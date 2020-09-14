@@ -75,21 +75,21 @@ void loop()
 {
 	switch(state)
 	{
-		case TX:
+	case TX:
             #ifndef SILENT
             Serial.print("Sending packet..");
             Serial.printf("(Size: %i)..", rxSize);
             #endif
             Radio.Send( (uint8_t *)mPacket, rxSize );
-		    state=LOWPOWER;
-		    break;
-		case RX:
-		    Radio.Rx( 0 );  // receive mode with no time-out
-		    state=LOWPOWER; 
-		    break;
-		case LOWPOWER:
-			lowPowerHandler(); // put SoC to sleep, wake-up at LoRa receive
-		    break;
+	    state=LOWPOWER;
+	    break;
+	case RX:
+	    Radio.Rx( 0 );  // receive mode with no time-out
+	    state=LOWPOWER; 
+	    break;
+	case LOWPOWER:
+	    lowPowerHandler(); // put SoC to sleep, wake-up at LoRa receive
+	    break;
         default:
             break;
 	}
@@ -98,10 +98,10 @@ void loop()
 
 void OnTxDone( void )
 {
-	#ifndef SILENT
+    #ifndef SILENT
     Serial.println(".done!");
     #endif
-	state=RX; // switch to receive mode
+    state=RX; // switch to receive mode
 }
 
 void OnTxTimeout( void )
@@ -115,8 +115,8 @@ void OnTxTimeout( void )
 
 void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 {
+    ( size > BUFFER_SIZE ) ?  rxSize = BUFFER_SIZE : rxSize = size;
     memcpy( mPacket, payload, size );
-    rxSize=size;
     Radio.Sleep();
 #ifndef SILENT
     Serial.printf("\nReceived packet! (Size %i bytes, RSSI %i, SNR %i)\n", size, rssi, snr);
