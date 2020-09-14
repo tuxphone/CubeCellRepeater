@@ -17,3 +17,5 @@ Modify radio settings for your own channels.
 Will work with any packet meeting the radio settings, but the serial output is based on the assumption that the node receives meshtastic packets.
 
 Will only send serial data, if "#define SILENT" is deleted, commented or set to another value (e.g. VERBOSE).
+
+Comment "#include <Arduino.h>" when using the Arduino IDE. The include is needed when using platform.io.
