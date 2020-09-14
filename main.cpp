@@ -7,7 +7,6 @@ so the copyright for this code belongs to Heltec Automation.
 Any additional changes are free-to-use, but at your own risk.
 */
 #include <Arduino.h>    // for platform.io, remove when using Arduino IDE    
-#include <radio.h>      // not needed when using platform.io
 
 // Radio settings for meshtastic channel "Default" @ "very long range (but slow)". Will not work with other settings or channels.
 #define RF_FREQUENCY                865200000   // Hz
