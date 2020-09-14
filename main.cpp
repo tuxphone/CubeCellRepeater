@@ -164,7 +164,7 @@ void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
     if (!found){ 
         state=TX; // will repeat package
         receivedID[receivedCount] = x; // add ID to received list
-        (receivedCount < (ID_BUFFER_SIZE - 1) ) ?  receivedCount++ : receivedCount = 0; // if counter = max, overwrite first entry in list, reset counter
+        (receivedCount < (ID_BUFFER_SIZE - 1) ) ?  receivedCount++ : receivedCount = 0; // if counter = max, reset counter. New entries will overwrite.
     }
     else{
         #ifndef SILENT
