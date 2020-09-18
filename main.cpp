@@ -6,32 +6,49 @@ so the copyright for this code belongs to Heltec Automation.
 
 Any additional changes are free-to-use, but at your own risk.
 */
-#include <Arduino.h>    // for platform.io, remove when using Arduino IDE    
 
+#include <Arduino.h>    // needed for platform.io
+#include "mesh.pb.h"
+
+// ToRadio Incoming;  // not used right now
 // Radio settings for meshtastic channel "Default" @ "very long range (but slow)". Will not work with other settings or channels.
-#define RF_FREQUENCY                865200000   // Hz
+// #define RF_FREQUENCY                865200000   // Hz  -- see "CH0" in Meshradio.h
 #define TX_OUTPUT_POWER             22          // dBm
-#define LORA_BANDWIDTH              0           // [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: Reserved]
-#define LORA_SPREADING_FACTOR       12          // [SF7..SF12]
+#define LORA_BANDWIDTH              0           // [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: 62.5kHz, 4: 41.67kHz, 5: 31.25kHz, 6: 20.83kHz, 7: 15.63kHz, 8: 10.42kHz, 9: 7.81kHz]
+// FYI:
+// const RadioLoRaBandwidths_t Bandwidths[] = { LORA_BW_125, LORA_BW_250, LORA_BW_500, LORA_BW_062,LORA_BW_041, LORA_BW_031, LORA_BW_020, LORA_BW_015, LORA_BW_010, LORA_BW_007 };
+
+
+#define LORA_SPREADING_FACTOR       12          // [SF5..SF12]
 #define LORA_CODINGRATE             4           // [1: 4/5, 2: 4/6, 3: 4/7, 4: 4/8]
 #define LORA_PREAMBLE_LENGTH        32          // Same for Tx and Rx
 #define LORA_SYMBOL_TIMEOUT         0           // Symbols
 #define LORA_FIX_LENGTH_PAYLOAD_ON  false
 #define LORA_IQ_INVERSION_ON        false
+#define LORA_CHAN_NUM               0           // Channel Number (meshtastic specific)
 #define RX_TIMEOUT_VALUE            1000
-#define BUFFER_SIZE                 512         // max payload = maximum of the SX12xx
+#define BUFFER_SIZE                 0xFF        // max payload (see  \cores\asr650x\device\asr6501_lrwan\radio.c  --> MaxPayloadLength)
 
 #define ID_BUFFER_SIZE              32
 
 char mPacket[BUFFER_SIZE];
 
+#define HW_VERSION_EU865 // define your region _before_ including MeshRadio.h !
+#include "MeshRadio.h"
+// initializing ChannelSettings with valid data... You can modify it to your settings here. Do not use ModemConfig. Change bw/sf/cr instead!
+// "Bandwidth" is the index of the array Bandwidths (see above), not the actual bandwidth! Index is starting with 0.
+ChannelSettings_psk_t mPSK;   // not used
+ChannelSettings ChanSet={ TX_OUTPUT_POWER, ChannelSettings_ModemConfig_Bw125Cr48Sf4096, mPSK, "Default", 
+                        LORA_BANDWIDTH, LORA_SPREADING_FACTOR, LORA_CODINGRATE, LORA_CHAN_NUM };
+
 uint32_t receivedID[ID_BUFFER_SIZE];
-int receivedCount = 0;
+int receivedCount = -1;
 
 static RadioEvents_t RadioEvents;
 void OnTxDone( void );
 void OnTxTimeout( void );
 void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr );
+void ConfigureRadio( ChannelSettings ChanSet );
 
 typedef enum
 {
@@ -46,7 +63,7 @@ uint32_t x;             // re-used variable of type uint32_t, used in onRxDone()
 bool found;             // used in onRxDone()
 
 
-#define SILENT         // delete or change to VERBOSE if serial output is needed
+#define NOTSILENT         // delete or change to VERBOSE if serial output is needed
 
 void setup() {
     #ifndef SILENT
@@ -56,40 +73,33 @@ void setup() {
     RadioEvents.TxDone = OnTxDone;
     RadioEvents.TxTimeout = OnTxTimeout;
     RadioEvents.RxDone = OnRxDone;
-
     Radio.Init( &RadioEvents );
-    Radio.SetChannel( RF_FREQUENCY );
-    Radio.SetTxConfig( MODEM_LORA, TX_OUTPUT_POWER, 0, LORA_BANDWIDTH, LORA_SPREADING_FACTOR, LORA_CODINGRATE,
-                                   LORA_PREAMBLE_LENGTH, 0, true, 0, 0, 0, 20000 );
-
-    Radio.SetRxConfig( MODEM_LORA, LORA_BANDWIDTH, LORA_SPREADING_FACTOR, LORA_CODINGRATE, 0, LORA_PREAMBLE_LENGTH,
-                                   LORA_SYMBOL_TIMEOUT, 0 , 0, true, 0, 0, 0, true );
-
-    state=RX;   // initial mode = receive
+    ConfigureRadio( ChanSet );
     #ifndef SILENT
     Serial.println(".done!\n");
     #endif
+    state=RX;   // initial mode = receive
 }
 
 void loop()
 {
 	switch(state)
 	{
-	case TX:
+		case TX:
             #ifndef SILENT
             Serial.print("Sending packet..");
             Serial.printf("(Size: %i)..", rxSize);
             #endif
             Radio.Send( (uint8_t *)mPacket, rxSize );
-	    state=LOWPOWER;
-	    break;
-	case RX:
-	    Radio.Rx( 0 );  // receive mode with no time-out
-	    state=LOWPOWER; 
-	    break;
-	case LOWPOWER:
-	    lowPowerHandler(); // put SoC to sleep, wake-up at LoRa receive
-	    break;
+		    state=LOWPOWER;
+		    break;
+		case RX:
+		    Radio.Rx( 0 );  // receive mode with no time-out
+		    state=LOWPOWER; 
+		    break;
+		case LOWPOWER:
+			lowPowerHandler(); // put SoC to sleep, wake-up at LoRa receive
+		    break;
         default:
             break;
 	}
@@ -98,10 +108,10 @@ void loop()
 
 void OnTxDone( void )
 {
-    #ifndef SILENT
+	#ifndef SILENT
     Serial.println(".done!");
     #endif
-    state=RX; // switch to receive mode
+	state=RX; // switch to receive mode
 }
 
 void OnTxTimeout( void )
@@ -163,13 +173,28 @@ void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
     }
     if (!found){ 
         state=TX; // will repeat package
+        (receivedCount < (ID_BUFFER_SIZE - 1) ) ?  receivedCount++ : receivedCount = 0; // if counter = max, overwrite first entry in list, reset counter
         receivedID[receivedCount] = x; // add ID to received list
-        (receivedCount < (ID_BUFFER_SIZE - 1) ) ?  receivedCount++ : receivedCount = 0; // if counter = max, reset counter. New entries will overwrite.
-    }
+     }
     else{
         #ifndef SILENT
         Serial.println("PacketID known, will not repeat again.");
         #endif
         state = RX; // wait for new package
     } 
+}
+
+void ConfigureRadio( ChannelSettings ChanSet )
+{
+    uint32_t freq = (CH0 + CH_SPACING * ChanSet.channel_num)*1E6;
+   
+    Serial.printf("\nSetting frequency to: %i ..",freq );
+
+    Radio.SetChannel( freq );
+    Radio.SetTxConfig( MODEM_LORA, TX_OUTPUT_POWER, 0, ChanSet.bandwidth, ChanSet.spread_factor, ChanSet.coding_rate,
+                                   LORA_PREAMBLE_LENGTH, false, true, false, 0, false, 20000 );
+
+    Radio.SetRxConfig( MODEM_LORA, ChanSet.bandwidth, ChanSet.spread_factor, ChanSet.coding_rate, 0, LORA_PREAMBLE_LENGTH,
+                                   LORA_SYMBOL_TIMEOUT, false , 0, true, false, 0, false, true );
+
 }
