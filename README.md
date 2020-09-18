@@ -16,7 +16,7 @@ Will work with any packet meeting the radio settings, but the serial output is b
 
 Modify radio settings for your own channels:
 
-Look for the following defines and change to your needs. The settings will be stored in "CanSet" and used to configure the radio.
+Look for the following defines and change to your needs. The settings will be stored in "ChanSet" and used to configure the radio.
 
 #define LORA_SPREADING_FACTOR       12          // [SF5..SF12]
 
