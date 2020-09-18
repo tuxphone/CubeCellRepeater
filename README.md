@@ -19,13 +19,18 @@ Modify radio settings for your own channels:
 Look for the following defines and change to your needs. The settings will be stored in "CanSet" and used to configure the radio.
 
 #define LORA_SPREADING_FACTOR       12          // [SF5..SF12]
+
 #define LORA_CODINGRATE             4           // [1: 4/5, 2: 4/6, 3: 4/7, 4: 4/8]
+
 #define LORA_CHAN_NUM               0           // Channel Number (meshtastic specific)
+
 
 Note: with "HW_VERSION" you select your country/continent settings. For US use HW_VERSION_US, for CN use HW_VERSION_CN. See Meshradio.h
 
 #define HW_VERSION_EU865 // define your region _before_ including MeshRadio.h !
+
 #include "MeshRadio.h"
+
 
 ChannelSettings ChanSet={ TX_OUTPUT_POWER, ChannelSettings_ModemConfig_Bw125Cr48Sf4096, mPSK, "Default", 
                         LORA_BANDWIDTH, LORA_SPREADING_FACTOR, LORA_CODINGRATE, LORA_CHAN_NUM };
