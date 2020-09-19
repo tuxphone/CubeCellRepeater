@@ -155,7 +155,7 @@ void OnTxTimeout( void )
 void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 {
     ( size > BUFFER_SIZE ) ?  rxSize = BUFFER_SIZE : rxSize = size;
-    memcpy( mPacket, payload, size );
+    memcpy( mPacket, payload, rxSize );
     Radio.Sleep();
     uint32_t packetID = (uint32_t)mPacket[11]<<24 | (uint32_t)mPacket[10]<<16 | (uint32_t)mPacket[9]<<8 | (uint32_t)mPacket[8];
 
