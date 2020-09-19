@@ -20,6 +20,9 @@ Edit the CONFIGURATION block in MeshRadio.h
 
 e.g.
 HW_VERSION_EU865  -  defines your region (to EU). For US, use HW_VERSION_US, for CN use HW_VERSION_CN etc.
+
 MESHTASTIC_SPEED    3   - defines your speed to "very long range". Other values are:  0 = short range, 1 = medium range, 2 = long range, 3 = very long range
+
 MESHTASTIC_NAME[12] = {"Default"} - sets yor Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
+
 TX_OUTPUT_POWER     22  -  sets output power to 22 dB. Keep in mind the maximums set by law and the hardware
