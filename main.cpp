@@ -38,7 +38,7 @@ void setup() {
     RadioEvents.RxDone = RxDone;
     Radio.Init( &RadioEvents );
     Radio.Sleep();
-    ChanSet.name[12] = MESHTASTIC_NAME[12];
+    memcpy(ChanSet.name, MESHTASTIC_NAME, 12);
     ChanSet.channel_num = hash( MESHTASTIC_NAME ) % NUM_CHANNELS;  // see MeshRadio.h
     ChanSet.tx_power    = TX_OUTPUT_POWER;
     /* FYI: 
@@ -200,6 +200,7 @@ void ConfigureRadio( ChannelSettings ChanSet )
     uint32_t freq = (CH0 + CH_SPACING * ChanSet.channel_num)*1E6;
     #ifndef SILENT
     Serial.printf("\nSetting frequency to %i Hz (meshtastic channel %i) .. \n",freq,ChanSet.channel_num );
+    Serial.printf("Channel name is %s .. \n", ChanSet.name );
     Serial.printf("Setting bandwidth to index %i ..\n",ChanSet.bandwidth);
     Serial.printf("Setting CodeRate to index %i .. \n", ChanSet.coding_rate);
     Serial.printf("Setting SpreadingFactor to %i ..\n",ChanSet.spread_factor);
