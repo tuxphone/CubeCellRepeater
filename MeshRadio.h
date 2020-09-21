@@ -1,8 +1,8 @@
 // CONFIGURATION HERE
 #define HW_VERSION_EU865        // define your region here. For US, use HW_VERSION_US, for CN use HW_VERSION_CN etc.
-#define MESHTASTIC_SPEED    3   // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
+#define TX_OUTPUT_POWER     14  // output power in dB, keep in mind the maximums set by law and the hardware
+#define MESHTASTIC_SPEED    1   // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
 char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
-#define TX_OUTPUT_POWER     22  // output power in dB, keep in mind the maximums set by law and the hardware
 // END OF CONFIGURATION
 
 // US channel settings
