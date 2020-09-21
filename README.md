@@ -11,7 +11,9 @@ Keep in mind that re-sending packets will cause the initial sender to assume tha
 If no other meshtastic node is in range of either the node or the repeater, the message will still be shown as received. 
 You can use this for range tests.
 
-Will work with any packet meeting the radio settings, but the serial output is based on the assumption that the node receives meshtastic packets.
+Will work with most packets meeting the radio settings, but the serial output is based on the assumption that the node receives meshtastic packets.
+Minimum size for none-Meshtastic packets is 14 bytes.
+
 "#define SILENT" to stop serial output.
 
 Modify radio settings for your own channels:
@@ -23,6 +25,6 @@ HW_VERSION_EU865  -  defines your region (to EU). For US, use HW_VERSION_US, for
 
 MESHTASTIC_SPEED    3   - defines your speed to "very long range". Other values are:  0 = short range, 1 = medium range, 2 = long range, 3 = very long range
 
-MESHTASTIC_NAME[12] = {"Default"} - sets yor Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
+MESHTASTIC_NAME[12] = {"Default"} - sets your Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
 
 TX_OUTPUT_POWER     22  -  sets output power to 22 dB. Keep in mind the maximums set by law and the hardware
