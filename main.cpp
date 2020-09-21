@@ -1,63 +1,43 @@
-/*
-COPYRIGHT NOTICE
-
-This work is based on the Factory_test examples, found here: https://github.com/HelTecAutomation/ASR650x-Arduino/tree/master/libraries/Basics/examples
-so the copyright for this code belongs to Heltec Automation.
-
-Any additional changes are free-to-use, but at your own risk.
-*/
-
-// CONFIGURATION of Meshtastic channel name and speed: change values in MeshRadio.h !
-
 #include <Arduino.h>    // needed for platform.io
 #include "mesh.pb.h"
 #include "MeshRadio.h"
+// CONFIGURATION of Meshtastic channel name and speed: change values in MeshRadio.h !
 
 #define LORA_PREAMBLE_LENGTH        32          // Same for Tx and Rx
 #define LORA_SYMBOL_TIMEOUT         0           // Symbols
 #define RX_TIMEOUT_VALUE            1000
-#define BUFFER_SIZE                 0xFF        // max payload (see  \cores\asr650x\device\asr6501_lrwan\radio.c  --> MaxPayloadLength)
+#define MAX_PAYLOAD_LENGTH          0xFF        // max payload (see  \cores\asr650x\device\asr6501_lrwan\radio.c  --> MaxPayloadLength)
 #define ID_BUFFER_SIZE              32
 
-char mPacket[BUFFER_SIZE];
+#define VERBOSE                                // define to SILENT to turn off serial messages
 
-static RadioEvents_t RadioEvents;
-void OnTxDone( void );
-void OnTxTimeout( void );
-void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr );
+typedef struct {
+    uint32_t to, from, id; 
+    uint8_t flags;       // The bottom three bits of flags are use to store hop_limit, bit 4 is the WANT_ACK flag
+} PacketHeader;
+
+void TxDone( void );
+void TxTimeout( void );
+void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr );
 void ConfigureRadio( ChannelSettings ChanSet );
 unsigned long hash(char *str);
 
+MeshPacket thePacket;
 ChannelSettings ChanSet;
-
+static RadioEvents_t RadioEvents;
 uint32_t receivedID[ID_BUFFER_SIZE];
 int receivedCount = -1;
-
-typedef enum
-{
-    LOWPOWER,
-    RX,
-    TX
-}States_t;
-
-States_t state;
-int16_t rxSize;
-uint32_t x;             // re-used variable of type uint32_t, used in onRxDone()
-bool found;             // used in onRxDone()
-
-
-#define VERBOSE         // delete or change to VERBOSE if serial output is needed
 
 void setup() {
     #ifndef SILENT
     Serial.begin(115200);
     Serial.println("\nSetting up Radio:");
     #endif
-    RadioEvents.TxDone = OnTxDone;
-    RadioEvents.TxTimeout = OnTxTimeout;
-    RadioEvents.RxDone = OnRxDone;
+    RadioEvents.TxDone = TxDone;
+    RadioEvents.TxTimeout = TxTimeout;
+    RadioEvents.RxDone = RxDone;
     Radio.Init( &RadioEvents );
-    
+    Radio.Sleep();
     ChanSet.name[12] = MESHTASTIC_NAME[12];
     ChanSet.channel_num = hash( MESHTASTIC_NAME ) % NUM_CHANNELS;  // see MeshRadio.h
     ChanSet.tx_power    = TX_OUTPUT_POWER;
@@ -105,114 +85,102 @@ void setup() {
     }
     ConfigureRadio( ChanSet );
     #ifndef SILENT
-    Serial.println("..done!\n");
+    Serial.println("..done! Switch to Receive Mode.\n");
     #endif
-    state=RX;   // initial mode = receive
+    Radio.Rx(0);  // initial mode = receive
 }
 
-void loop()
+void loop( )
 {
-	switch(state)
-	{
-		case TX:
-            #ifndef SILENT
-            Serial.print("Sending packet..");
-            Serial.printf("(Size: %i)..", rxSize);
-            #endif
-            Radio.Send( (uint8_t *)mPacket, rxSize );
-		    state=LOWPOWER;
-		    break;
-		case RX:
-		    Radio.Rx( 0 );  // receive mode with no time-out
-		    state=LOWPOWER; 
-		    break;
-		case LOWPOWER:
-			lowPowerHandler(); // put SoC to sleep, wake-up at LoRa receive
-		    break;
-        default:
-            break;
-	}
+    lowPowerHandler( ); 
     Radio.IrqProcess( );
 }
 
-void OnTxDone( void )
+void TxDone( void )
 {
 	#ifndef SILENT
-    Serial.println(".done!");
+    Serial.println(".done! Switch to Receive Mode.");
     #endif
-	state=RX; // switch to receive mode
+    Radio.Sleep( );
+	Radio.Rx( 0 ); // switch to receive mode
 }
 
-void OnTxTimeout( void )
+void TxTimeout( void )
 {
     #ifndef SILENT
-    Serial.println(".failed! (TX Timeout)");
+    Serial.println(".failed (TX Timeout)! Switch to Receive Mode.");
     #endif
-    Radio.Sleep();
-    state=RX; // switch to receive mode
+    Radio.Sleep( );
+    Radio.Rx( 0 ); // switch to receive mode
 }
 
-void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
+void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 {
-    ( size > BUFFER_SIZE ) ?  rxSize = BUFFER_SIZE : rxSize = size;
-    memcpy( mPacket, payload, rxSize );
-    Radio.Sleep();
-    uint32_t packetID = (uint32_t)mPacket[11]<<24 | (uint32_t)mPacket[10]<<16 | (uint32_t)mPacket[9]<<8 | (uint32_t)mPacket[8];
-
+    Radio.Sleep( );
+    if ( size > MAX_PAYLOAD_LENGTH ) size = MAX_PAYLOAD_LENGTH;
+    if ( !(size > sizeof(PacketHeader)) ) {
+        #ifndef SILENT
+            Serial.printf("\nReceived packet! (Size %i bytes, RSSI %i, SNR %i)\n", size, rssi, snr);
+            Serial.println("Packet to small (No MeshPacket), discard. Switch to Receive Mode.");
+        #endif
+        Radio.Rx( 0 );
+        return;
+    }
+    PacketHeader * h = (PacketHeader *)payload;
+    MeshPacket   * p = &thePacket;
+    p->to   = h->to;
+    p->from = h->from;
+    p->id   = h->id;
+    p->hop_limit = h->flags && 0b00000111;
+    p->want_ack  = h->flags && 0b00001000;
+    p->which_payload = MeshPacket_encrypted_tag;
+    p->encrypted.size= size - sizeof(PacketHeader);
+    memcpy(p->encrypted.bytes, payload + sizeof(PacketHeader), p->encrypted.size);
+    
 #ifndef SILENT
     Serial.printf("\nReceived packet! (Size %i bytes, RSSI %i, SNR %i)\n", size, rssi, snr);
     
     Serial.print("TO: ");
-    for(int i=3; i>-1; i--){
-        Serial.print(mPacket[i], HEX);
-    }
+    (thePacket.to == UINT32_MAX) ? Serial.print( "BROADCAST" ) : Serial.print( thePacket.to, HEX );
 
     Serial.print("  FROM: ");
-    for(int i=7; i>3; i--){
-        Serial.print(mPacket[i], HEX);
-    }
-/*
-    Serial.print("  PacketID: ");
-    for(int i=11; i>7; i--){
-        Serial.print(mPacket[i], HEX);
-    }
-*/
+    Serial.print(thePacket.from, HEX);
+
     Serial.print("  Packet ID: ");
-    Serial.println(packetID, HEX);
+    Serial.print(thePacket.id, HEX);
 
-    Serial.print("  Flags: ");
-    x = mPacket[12];
-    Serial.print("WANT_ACK=");
-    if (x > 8) {
-        Serial.print("YES ");
-        x -= 8;
-    }
-    else Serial.print("NO ");
-
-    Serial.printf("HOP_LIMIT=%i", x);
-    Serial.println();
-
+    Serial.print("  Flags: WANT_ACK=");
+    Serial.print( (thePacket.want_ack) ? "YES " : "NO ");
+    
+    Serial.printf("HOP_LIMIT=%i\n", thePacket.hop_limit);
+    
     Serial.print("Payload: ");
-    for(int i=13; i<size; i++){        
-        Serial.print(mPacket[i], HEX);
+    for(int i=0; i < p->encrypted.size; i++){        
+        Serial.print(p->encrypted.bytes[i], HEX);
         Serial.print(" ");
     }
     Serial.println();
 #endif 
-    found = false;
+    bool found = false;
     for(int i = 0; i < ID_BUFFER_SIZE; i++){
-        if (receivedID[i] == packetID) found = true;
+        if (receivedID[i] == thePacket.id) found = true;
     }
     if (!found){ 
-        state=TX; // will repeat package
+        // will repeat package
+        
+        #ifndef SILENT
+            Serial.print("Sending packet..");
+            Serial.printf("(Size: %i)..", size);
+        #endif 
         (receivedCount < (ID_BUFFER_SIZE - 1) ) ?  receivedCount++ : receivedCount = 0; // if counter = max, overwrite first entry in list, reset counter
-        receivedID[receivedCount] = x; // add ID to received list
+        receivedID[receivedCount] = thePacket.id; // add ID to received list
+        Radio.Send( payload, size );
      }
     else{
         #ifndef SILENT
-        Serial.println("PacketID known, will not repeat again.");
+            Serial.println("PacketID known, will not repeat again.");
         #endif
-        state = RX; // wait for new package
+        Radio.Rx( 0 ); // wait for new package
     } 
 }
 
@@ -223,7 +191,7 @@ unsigned long hash(char *str)
     unsigned long hash = 5381;
     int c;
     while ((c = *str++) != 0)
-      hash = ((hash << 5) + hash) + (unsigned char) c;
+      hash = ((hash << 5) + hash) + (unsigned char) c;    // hash * 33 + c //
     return hash;
 }
 
