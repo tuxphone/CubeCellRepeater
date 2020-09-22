@@ -6,6 +6,10 @@ The actual node can be one of the LoRa CubeCell nodes by Heltec Automation: http
 
 Notes:
 
+Intended for use with the platform.io IDE. The platformio.ini for this project should contain "monitor_speed=115200" to use the built-in serial monitor.
+
+Will work with Arduino IDE - just rename main.cpp to a valid Arduino sketch name (e.g. "CubeCellRepeater.ino") and put all files to a directory with the same name ("CubeCellRepeater"), then import project.
+
 Will repeat packets ONCE. To prevent flooding a short list of received packet IDs is checked against the ID of the current packet.
 Keep in mind that re-sending packets will cause the initial sender to assume that the packet is "received" or at least in the mesh.
 If no other meshtastic node is in range of either the node or the repeater, the message will still be shown as received. 
