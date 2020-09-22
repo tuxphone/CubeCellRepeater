@@ -1,19 +1,15 @@
 #include <Arduino.h>    // needed for platform.io
 #include "mesh.pb.h"
+#include "CubeCell_NeoPixel.h"
 #include "MeshRadio.h"
-// CONFIGURATION of Meshtastic channel name and speed: change values in MeshRadio.h !
-
-#define LORA_PREAMBLE_LENGTH        32          // Same for Tx and Rx
-#define LORA_SYMBOL_TIMEOUT         0           // Symbols
-#define RX_TIMEOUT_VALUE            1000
-#define MAX_PAYLOAD_LENGTH          0xFF        // max payload (see  \cores\asr650x\device\asr6501_lrwan\radio.c  --> MaxPayloadLength)
-#define ID_BUFFER_SIZE              32
-
-#define VERBOSE                                // define to SILENT to turn off serial messages
+// CONFIGURATION: change values in MeshRadio.h !
+#include <radio.h>
+#define VERBOSE         // define to SILENT to turn off serial messages
+#define BLINK           // define to NOBLINK to turn off LED signaling
 
 typedef struct {
     uint32_t to, from, id; 
-    uint8_t flags;       // The bottom three bits of flags are use to store hop_limit, bit 4 is the WANT_ACK flag
+    uint8_t flags;      // The bottom three bits of flags are use to store hop_limit, bit 4 is the WANT_ACK flag
 } PacketHeader;
 
 void TxDone( void );
@@ -27,12 +23,20 @@ ChannelSettings ChanSet;
 static RadioEvents_t RadioEvents;
 uint32_t receivedID[ID_BUFFER_SIZE];
 int receivedCount = -1;
+CubeCell_NeoPixel pixels(1, RGB, NEO_GRB + NEO_KHZ800);
 
 void setup() {
-    #ifndef SILENT
+#ifndef NOBLINK
+    pinMode(Vext,OUTPUT);
+    digitalWrite(Vext,LOW); //SET POWER
+    pixels.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)
+    pixels.clear(); // Set all pixel colors to 'off'
+    pixels.show();
+#endif
+#ifndef SILENT
     Serial.begin(115200);
     Serial.println("\nSetting up Radio:");
-    #endif
+#endif
     RadioEvents.TxDone = TxDone;
     RadioEvents.TxTimeout = TxTimeout;
     RadioEvents.RxDone = RxDone;
@@ -41,6 +45,7 @@ void setup() {
     memcpy(ChanSet.name, MESHTASTIC_NAME, 12);
     ChanSet.channel_num = hash( MESHTASTIC_NAME ) % NUM_CHANNELS;  // see MeshRadio.h
     ChanSet.tx_power    = TX_OUTPUT_POWER;
+    ChanSet.psk         = MESHTASTIC_PSK;
     /* FYI: 
     "bandwidth":
     [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: 62.5kHz, 4: 41.67kHz, 5: 31.25kHz, 6: 20.83kHz, 7: 15.63kHz, 8: 10.42kHz, 9: 7.81kHz]
@@ -67,7 +72,7 @@ void setup() {
         }
         case 2: {  // long range 
             ChanSet.bandwidth = 5;      // 31.25 kHz
-            ChanSet.coding_rate = 4;    // = 4/5
+            ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 9;
             break;
         }
@@ -84,9 +89,9 @@ void setup() {
         }
     }
     ConfigureRadio( ChanSet );
-    #ifndef SILENT
+#ifndef SILENT
     Serial.println("..done! Switch to Receive Mode.\n");
-    #endif
+#endif
     Radio.Rx(0);  // initial mode = receive
 }
 
@@ -98,19 +103,28 @@ void loop( )
 
 void TxDone( void )
 {
-	#ifndef SILENT
-    Serial.println(".done! Switch to Receive Mode.");
-    #endif
     Radio.Sleep( );
+#ifndef NOBLINK
+    pixels.clear( );
+    pixels.show( );
+#endif
+#ifndef SILENT
+    Serial.println(".done! Switch to Receive Mode.");
+#endif
 	Radio.Rx( 0 ); // switch to receive mode
 }
 
 void TxTimeout( void )
 {
-    #ifndef SILENT
-    Serial.println(".failed (TX Timeout)! Switch to Receive Mode.");
-    #endif
     Radio.Sleep( );
+#ifndef NOBLINK
+    pixels.clear( );
+    pixels.show( );
+#endif
+
+#ifndef SILENT
+    Serial.println(".failed (TX Timeout)! Switch to Receive Mode.");
+#endif
     Radio.Rx( 0 ); // switch to receive mode
 }
 
@@ -136,7 +150,6 @@ void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
     p->which_payload = MeshPacket_encrypted_tag;
     p->encrypted.size= size - sizeof(PacketHeader);
     memcpy(p->encrypted.bytes, payload + sizeof(PacketHeader), p->encrypted.size);
-    
 #ifndef SILENT
     Serial.printf("\nReceived packet! (Size %i bytes, RSSI %i, SNR %i)\n", size, rssi, snr);
     
@@ -167,20 +180,23 @@ void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
     }
     if (!found){ 
         // will repeat package
-        
         #ifndef SILENT
             Serial.print("Sending packet..");
             Serial.printf("(Size: %i)..", size);
         #endif 
         (receivedCount < (ID_BUFFER_SIZE - 1) ) ?  receivedCount++ : receivedCount = 0; // if counter = max, overwrite first entry in list, reset counter
         receivedID[receivedCount] = thePacket.id; // add ID to received list
+        #ifndef NOBLINK
+            pixels.setPixelColor( 0, RGB_RED );    // send mode
+            pixels.show();
+        #endif
         Radio.Send( payload, size );
      }
     else{
         #ifndef SILENT
             Serial.println("PacketID known, will not repeat again.");
         #endif
-        Radio.Rx( 0 ); // wait for new package
+        Radio.Rx( 0 ); // switch to Receive Mode
     } 
 }
 
