@@ -5,6 +5,17 @@
 char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
 // END OF CONFIGURATION
 
+#define MESHTASTIC_PSK      { 0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0xbf }
+
+#define RGB_GREEN                   0x000300    // receive mode
+#define RGB_RED                     0x030000    // send mode
+
+#define LORA_PREAMBLE_LENGTH        32          // Same for Tx and Rx
+#define LORA_SYMBOL_TIMEOUT         0           // Symbols
+#define RX_TIMEOUT_VALUE            1000
+#define MAX_PAYLOAD_LENGTH          0xFF        // max payload (see  \cores\asr650x\device\asr6501_lrwan\radio.c  --> MaxPayloadLength)
+#define ID_BUFFER_SIZE              32
+
 // US channel settings
 #define CH0_US 903.08f      // MHz
 #define CH_SPACING_US 2.16f // MHz
@@ -57,4 +68,3 @@ char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" su
 #define CH_SPACING CH_SPACING_US
 #define NUM_CHANNELS NUM_CHANNELS_US
 #endif
-
