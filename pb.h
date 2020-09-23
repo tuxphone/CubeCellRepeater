@@ -68,6 +68,7 @@
  * a custom header that defines or includes all this. In that case,
  * define PB_SYSTEM_HEADER to the path of this file.
  */
+/*
 #ifdef PB_SYSTEM_HEADER
 #include PB_SYSTEM_HEADER
 #else
@@ -81,7 +82,7 @@
 #include <stdlib.h>
 #endif
 #endif
-
+*/
 #ifdef __cplusplus
 extern "C" {
 #endif
