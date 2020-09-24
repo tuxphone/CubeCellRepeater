@@ -7,8 +7,7 @@ The actual node can be one of the LoRa CubeCell nodes by Heltec Automation: http
 Notes:
 
 Intended for use with the platform.io IDE. The platformio.ini for this project should contain "monitor_speed=115200" to use the built-in serial monitor.
-
-Will work with Arduino IDE - just rename main.cpp to a valid Arduino sketch name (e.g. "CubeCellRepeater.ino") and put all files to a directory with the same name ("CubeCellRepeater"), then import project.
+((( Should work with Arduino IDE - rename main.cpp to a valid Arduino sketch name (e.g. "CubeCellRepeater.ino") and put all files to a directory with the same name ("CubeCellRepeater"), then import project. )))
 
 Will repeat packets ONCE. To prevent flooding a short list of received packet IDs is checked against the ID of the current packet.
 Keep in mind that re-sending packets will cause the initial sender to assume that the packet is "received" or at least in the mesh.
@@ -31,4 +30,4 @@ MESHTASTIC_SPEED    3   - defines your speed to "very long range". Other values 
 
 MESHTASTIC_NAME[12] = {"Default"} - sets your Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
 
-TX_OUTPUT_POWER     22  -  sets output power to 22 dB. Keep in mind the maximums set by law and the hardware
+TX_OUTPUT_POWER     14  -  sets output power to 14 dB. Keep in mind the maximums set by law and the hardware
