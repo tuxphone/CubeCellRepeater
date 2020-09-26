@@ -19,6 +19,7 @@ Will work with most packets meeting the radio settings, but the serial output is
 Minimum size for none-Meshtastic packets is 14 bytes.
 
 "#define SILENT" to stop serial output.
+
 "#define NOBLINK" to NOT getting a red blink from the RGB LED for the duration of sending a packet (can be quite long at speed setting 3).
 
 Modify radio settings for your own channels:
