@@ -7,6 +7,7 @@ The actual node can be one of the LoRa CubeCell nodes by Heltec Automation: http
 Notes:
 
 Intended for use with the platform.io IDE. The platformio.ini for this project should contain "monitor_speed=115200" to use the built-in serial monitor.
+
 ((( Should work with Arduino IDE - rename main.cpp to a valid Arduino sketch name (e.g. "CubeCellRepeater.ino") and put all files to a directory with the same name ("CubeCellRepeater"), then import project. )))
 
 Will repeat packets ONCE. To prevent flooding a short list of received packet IDs is checked against the ID of the current packet.
@@ -18,6 +19,7 @@ Will work with most packets meeting the radio settings, but the serial output is
 Minimum size for none-Meshtastic packets is 14 bytes.
 
 "#define SILENT" to stop serial output.
+"#define NOBLINK" to NOT getting a red blink from the RGB LED for the duration of sending a packet (can be quite long at speed setting 3).
 
 Modify radio settings for your own channels:
 
