@@ -1,6 +1,6 @@
 #include "mesh.pb.h"
 // CONFIGURATION HERE:
-#define REGION  RegionCode_EU865   // define your region here. For US, RegionCode_US, CN RegionCode_Cn etc.
+uint8_t REGION = RegionCode_EU865 ;   // define your region here. For US, RegionCode_US, CN RegionCode_Cn etc.
 char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
 #define MESHTASTIC_SPEED    3   // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
 
