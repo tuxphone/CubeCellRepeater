@@ -34,7 +34,8 @@ void setup() {
     Radio.Sleep();
     memcpy(ChanSet.name, MESHTASTIC_NAME, 12);
     ChanSet.channel_num = hash( MESHTASTIC_NAME ) % myRegion[REGION].numChannels;  // see MeshRadio.h
-    ChanSet.tx_power    = (myRegion[REGION].powerLimit == 0) ? TX_MAX_POWER : myRegion[REGION].powerLimit ;
+    ChanSet.tx_power    = (myRegion[REGION].powerLimit == 0) ? TX_MAX_POWER : myRegion[REGION].powerLimit;
+    if (ChanSet.tx_power > TX_MAX_POWER) ChanSet.tx_power = TX_MAX_POWER;
     ChanSet.psk         = MESHTASTIC_PSK;
     /* FYI: 
     "bandwidth":
