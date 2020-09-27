@@ -1,6 +1,6 @@
 #include "mesh.pb.h"
 // CONFIGURATION HERE:
-uint8_t REGION = RegionCode_EU865 ;   // define your region here. For US, RegionCode_US, CN RegionCode_Cn etc.
+#define REGION   RegionCode_EU865   // define your region here. For US, RegionCode_US, CN RegionCode_Cn etc.
 char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
 #define MESHTASTIC_SPEED    3   // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
 
@@ -59,6 +59,7 @@ struct RegionInfo {
 };
 
 const RegionInfo regions[] = {
+    RDEF(Unset, 903.08f, 2.16f, 13, 0), // Assume US freqs if unset
     RDEF(US, 903.08f, 2.16f, 13, 0), 
     RDEF(EU433, 433.175f, 0.2f, 8, 0), 
     RDEF(EU865, 865.2f, 0.3f, 10, 0),
@@ -67,8 +68,7 @@ const RegionInfo regions[] = {
     RDEF(ANZ, 916.0f, 0.5f, 20, 0),    // AU/NZ channel settings 915-928MHz
     RDEF(KR, 921.9f, 0.2f, 8, 0),      // KR channel settings (KR920-923) Start from TTN download channel
                                        // freq. (921.9f is for download, others are for uplink)
-    RDEF(TW, 923.0f, 0.2f, 10, 0),     // TW channel settings (AS2 bandplan 923-925MHz)
-    RDEF(Unset, 903.08f, 2.16f, 13, 0) // Assume US freqs if unset, Must be last
+    RDEF(TW, 923.0f, 0.2f, 10, 0)     // TW channel settings (AS2 bandplan 923-925MHz)
 };
 
-static const RegionInfo *myRegion;
+//static const RegionInfo *myRegion;

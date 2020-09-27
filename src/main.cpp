@@ -4,7 +4,7 @@
 
 // CONFIGURATION: change values in config.h !
 #define VERBOSE        // define to SILENT to turn off serial messages
-#define NOBLINK        // define to NOBLINK to turn off LED signaling
+#define BLINK        // define to NOBLINK to turn off LED signaling
 
 MeshPacket thePacket;
 ChannelSettings ChanSet;
@@ -33,10 +33,9 @@ void setup() {
     Radio.Init( &RadioEvents );
     Radio.Sleep();
     memcpy(ChanSet.name, MESHTASTIC_NAME, 12);
-    REGION -= 1;
-    ChanSet.channel_num = hash( MESHTASTIC_NAME ) % regions[REGION].numChannels;  // see config.h
-    ChanSet.tx_power    = (regions[REGION].powerLimit == 0) ? TX_MAX_POWER : regions[REGION].powerLimit ;
-    if (ChanSet.tx_power > TX_MAX_POWER) ChanSet.tx_power = TX_MAX_POWER;
+    //myRegion = &regions[REGION];    
+    ChanSet.channel_num = hash( MESHTASTIC_NAME ) % regions[REGION].numChannels; // see config.h
+    ChanSet.tx_power    = (regions[REGION].powerLimit == 0) ? TX_MAX_POWER : MAX(regions[REGION].powerLimit, TX_MAX_POWER) ;
     ChanSet.psk         = MESHTASTIC_PSK;
     /* FYI: 
     "bandwidth":
@@ -183,9 +182,12 @@ unsigned long hash(char *str)
 
 void ConfigureRadio( ChannelSettings ChanSet )
 {
+    //uint32_t freq = (myRegion->freq + myRegion->spacing * ChanSet.channel_num)*1E6;
     uint32_t freq = (regions[REGION].freq + regions[REGION].spacing * ChanSet.channel_num)*1E6;
+    
     #ifndef SILENT
-    MSG("\nRegion is: %s\n",regions[REGION].name);
+    MSG("\nRegion is: %s", regions[REGION].name);
+    MSG("  TX power: %i\n", ChanSet.tx_power);
     MSG("Setting frequency to %i Hz (meshtastic channel %i) .. \n",freq,ChanSet.channel_num );
     MSG("Channel name is: %s .. \n", ChanSet.name );
     MSG("Setting bandwidth to index %i ..\n",ChanSet.bandwidth);
@@ -195,8 +197,6 @@ void ConfigureRadio( ChannelSettings ChanSet )
     Radio.SetChannel( freq );
     Radio.SetTxConfig( MODEM_LORA, ChanSet.tx_power ,0 , ChanSet.bandwidth, ChanSet.spread_factor, ChanSet.coding_rate,
                                    LORA_PREAMBLE_LENGTH, false, true, false, 0, false, 20000 );
-
     Radio.SetRxConfig( MODEM_LORA, ChanSet.bandwidth, ChanSet.spread_factor, ChanSet.coding_rate, 0, LORA_PREAMBLE_LENGTH,
                                    LORA_SYMBOL_TIMEOUT, false , 0, true, false, 0, false, true );
 }
-
