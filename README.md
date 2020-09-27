@@ -6,11 +6,11 @@ The actual node can be one of the LoRa CubeCell nodes by Heltec Automation: http
 
 Notes:
 
-Intended for use with the platform.io IDE. The platformio.ini for this project should contain "monitor_speed=115200" to use the built-in serial monitor.
+Intended for use with the platform.io IDE. Depends on the NanoPB Lib. Serial output speed is 115200.
+See the provided platformio.ini for built-in environments. Default is cubecell_board.
 
-((( Should work with Arduino IDE - rename main.cpp to a valid Arduino sketch name (e.g. "CubeCellRepeater.ino") and put all files to a directory with the same name ("CubeCellRepeater"), then import project. )))
+Will repeat packets ONCE. To prevent flooding the last repeated packet ID will not be repeated again.
 
-Will repeat packets ONCE. To prevent flooding a short list of received packet IDs is checked against the ID of the current packet.
 Keep in mind that re-sending packets will cause the initial sender to assume that the packet is "received" or at least in the mesh.
 If no other meshtastic node is in range of either the node or the repeater, the message will still be shown as received. 
 You can use this for range tests.
@@ -24,13 +24,13 @@ Minimum size for none-Meshtastic packets is 14 bytes.
 
 Modify radio settings for your own channels:
 
-Edit the CONFIGURATION block in MeshRadio.h
+Edit the CONFIGURATION block in config.h
 
 e.g.
-HW_VERSION_EU865  -  defines your region (to EU). For US, use HW_VERSION_US, for CN use HW_VERSION_CN etc.
+#define REGION  RegionCode_EU865  -  defines your region (to EU865). For US, use RegionCode_US, for CN use RegionCode_CN etc. See config.h for more supported regions.
 
-MESHTASTIC_SPEED    3   - defines your speed to "very long range". Other values are:  0 = short range, 1 = medium range, 2 = long range, 3 = very long range
+MESHTASTIC_SPEED    3   - defines your speed to "very long range". Values are:  0 = short range, 1 = medium range, 2 = long range, 3 = very long range
 
 MESHTASTIC_NAME[12] = {"Default"} - sets your Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
 
-TX_OUTPUT_POWER     14  -  sets output power to 14 dB. Keep in mind the maximums set by law and the hardware
+TX_MAX_POWER     14  -  sets output power to 14 dB. This value will also be used, wenn output power is set to Zero in your RegionCode (0 = max. power). TX_MAX_POWER will be ignored, when higher than RegionCode maximum.
