@@ -35,7 +35,7 @@ void setup() {
     memcpy(ChanSet.name, MESHTASTIC_NAME, 12);
     //myRegion = &regions[REGION];    
     ChanSet.channel_num = hash( MESHTASTIC_NAME ) % regions[REGION].numChannels; // see config.h
-    ChanSet.tx_power    = (regions[REGION].powerLimit == 0) ? TX_MAX_POWER : MAX(regions[REGION].powerLimit, TX_MAX_POWER) ;
+    ChanSet.tx_power    = (regions[REGION].powerLimit == 0) ? TX_MAX_POWER : MIN(regions[REGION].powerLimit, TX_MAX_POWER) ;
     ChanSet.psk         = MESHTASTIC_PSK;
     /* FYI: 
     "bandwidth":
