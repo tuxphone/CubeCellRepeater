@@ -148,6 +148,12 @@ void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
     MSG("  Packet ID: ");       HEXMSG(thePacket.id);
     MSG("  Flags: WANT_ACK=");  MSG((thePacket.want_ack) ? "YES " : "NO ");
     MSG(" HOP_LIMIT=%i\n",      thePacket.hop_limit);
+    MSG("Payload:");
+    for (int i=0; i<p->encrypted.size; i++){
+        MSG(" ");
+        HEXMSG(p->encrypted.bytes[i]);
+    }
+    MSG("\n");
 #endif 
     if ( !(lastreceivedID == thePacket.id) ){ 
         // will repeat package
