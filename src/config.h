@@ -29,7 +29,7 @@ typedef enum _RegionCode {
 */
 
 // the PSK is not used for encrypion/decryption, you can leave it as it is
-#define MESHTASTIC_PSK      { 0x10, 0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0xbf }
+//#define MESHTASTIC_PSK      { 0x10, 0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0xbf }
 
 typedef struct {
     uint32_t to, from, id; 
@@ -37,7 +37,7 @@ typedef struct {
 } PacketHeader;
 
 #define MSG(...)    Serial.printf(__VA_ARGS__)
-#define HEXMSG(...) Serial.print (__VA_ARGS__ , HEX)
+//#define HEXMSG(...) Serial.print (__VA_ARGS__ , HEX)
 
 void TxDone( void );
 void TxTimeout( void );
@@ -74,3 +74,4 @@ const RegionInfo regions[] = {
 };
 
 //static const RegionInfo *myRegion;
+
