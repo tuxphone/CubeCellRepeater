@@ -22,6 +22,8 @@ Minimum size for none-Meshtastic packets is 14 bytes.
 
 "#define NOBLINK" to NOT getting a red blink from the RGB LED for the duration of sending a packet (can be quite long at speed setting 3).
 
+"define NO_OLED" to turn off messages on the OLED. Supported Boards for OLED mode are HTCC-AB02 and HTCC-AB02S (cubecell_board_Plus and cubecell_gps). 
+
 Modify radio settings for your own channels:
 
 Edit the CONFIGURATION block in config.h
