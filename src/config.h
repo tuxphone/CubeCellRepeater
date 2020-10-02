@@ -1,12 +1,12 @@
 #include "mesh.pb.h"
-// CONFIGURATION HERE:
+// CONFIGURATION:
 #define REGION   RegionCode_EU865   // define your region here. For US, RegionCode_US, CN RegionCode_Cn etc.
 char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
 #define MESHTASTIC_SPEED    3   // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
 #define TX_MAX_POWER     22     // max output power in dB, keep in mind the maximums set by law and the hardware
-// CONFIGURATION END
+// :CONFIGURATION
 
-#define RGB_GREEN                   0x000300    // receive mode  --- not longer used (save energy)
+#define RGB_GREEN                   0x000300    // receive mode  --- not longer used 
 #define RGB_RED                     0x030000    // send mode
 
 #define LORA_PREAMBLE_LENGTH        32          // Same for Tx and Rx
@@ -28,8 +28,12 @@ typedef enum _RegionCode {
 } RegionCode;
 */
 
-// the PSK is not used for encrypion/decryption, you can leave it as it is
-//#define MESHTASTIC_PSK      { 0x10, 0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0xbf }
+// the PSK is not used for encryption/decryption, you can leave it as it is
+#define MESHTASTIC_PSK      { 0x10, 0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0xbf }
+#define PSK_NOENCRYPTION    { 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+
+// Symbol times speed   0       1       2       3
+float_t symbTime[] = { 1.024 , 0.256, 16.384, 32.768 };
 
 typedef struct {
     uint32_t to, from, id; 
@@ -37,11 +41,11 @@ typedef struct {
 } PacketHeader;
 
 #define MSG(...)    Serial.printf(__VA_ARGS__)
-//#define HEXMSG(...) Serial.print (__VA_ARGS__ , HEX)
 
-void TxDone( void );
-void TxTimeout( void );
-void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr );
+void onTxDone( void );
+void onTxTimeout( void );
+void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr );
+void onCheckRadio(void);
 void ConfigureRadio( ChannelSettings ChanSet );
 unsigned long hash(char *str);
 
@@ -61,7 +65,7 @@ struct RegionInfo {
 };
 
 const RegionInfo regions[] = {
-    RDEF(Unset, 903.08f, 2.16f, 13, 0), // Assume US freqs if unset
+    RDEF(Unset, 903.08f, 2.16f, 13, 0), // I put it FIRST, so i can use regions[] with RegionCode as index (Unset == 0)
     RDEF(US, 903.08f, 2.16f, 13, 0), 
     RDEF(EU433, 433.175f, 0.2f, 8, 0), 
     RDEF(EU865, 865.2f, 0.3f, 10, 0),
@@ -72,6 +76,3 @@ const RegionInfo regions[] = {
                                        // freq. (921.9f is for download, others are for uplink)
     RDEF(TW, 923.0f, 0.2f, 10, 0)     // TW channel settings (AS2 bandplan 923-925MHz)
 };
-
-//static const RegionInfo *myRegion;
-
