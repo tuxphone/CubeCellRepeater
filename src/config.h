@@ -2,8 +2,8 @@
 // CONFIGURATION:
 #define REGION   RegionCode_EU865   // define your region here. For US, RegionCode_US, CN RegionCode_Cn etc.
 char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
-#define MESHTASTIC_SPEED    3   // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
-#define TX_MAX_POWER     22     // max output power in dB, keep in mind the maximums set by law and the hardware
+#define MESHTASTIC_SPEED  3     // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
+#define TX_MAX_POWER     14     // max output power in dB, keep in mind the maximums set by law and the hardware
 // :CONFIGURATION
 
 #define RGB_GREEN                   0x000300    // receive mode  --- not longer used 
@@ -32,8 +32,8 @@ typedef enum _RegionCode {
 #define MESHTASTIC_PSK      { 0x10, 0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0xbf }
 #define PSK_NOENCRYPTION    { 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
 
-// Symbol times speed   0       1       2       3
-float_t symbTime[] = { 1.024 , 0.256, 16.384, 32.768 };
+// sleep times @ speed   0    1   2     3
+uint32_t sleepTime[] = { 77, 20, 1512, 2499 };
 
 typedef struct {
     uint32_t to, from, id; 
