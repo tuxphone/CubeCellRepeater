@@ -14,8 +14,8 @@ static ChannelSettings ChanSet;
 static RadioEvents_t RadioEvents;
 static TimerEvent_t CheckRadio;
 static uint32_t lastreceivedID = 0;
-static uint32_t airTime = 500; //ms
-static bool noTimer = true;
+static uint32_t airTime;
+static bool noTimer;
 static uint32_t startTime = 0;
 
 #ifndef NOBLINK
@@ -114,8 +114,7 @@ void setup() {
             ChanSet.spread_factor = 7;
         }
     }
-    airTime = floor(symbTime[MESHTASTIC_SPEED] * (36.5 + 20*8 + 16) + 0.5); // simplified AirTime for the smallest MPacket (length 20 bytes)
-    //real AirTime is much longer, but this will give a good compromise regarding battery savings vs. reaction time 
+    airTime = sleepTime[MESHTASTIC_SPEED];
     ConfigureRadio( ChanSet );
 #ifndef SILENT
     MSG("..done! Switch to Receive Mode.\n");
@@ -285,10 +284,7 @@ void ConfigureRadio( ChannelSettings ChanSet )
     MSG("Setting bandwidth to index %i ..\n",ChanSet.bandwidth);
     MSG("Setting CodeRate to index %i .. \n", ChanSet.coding_rate);
     MSG("Setting SpreadingFactor to %i ..\n",ChanSet.spread_factor);
-    MSG("(est. SymbolTime for setting is ");
-    Serial.print(symbTime[MESHTASTIC_SPEED]); MSG("ms)\n");
-    MSG("(LowPowerTime = (36.5 + 8 x 20 + 16) x SymbolTime (Preamble + 20 byte minimal packet length + 16 bit CRC) - very simplified calculation!)\n");
-    MSG("LowPowerTime: "); Serial.print(airTime); MSG("ms ..\n");
+    MSG("LowPowerTime: %ims ..\n", airTime);
     #endif
     Radio.SetChannel( freq );
     Radio.SetTxConfig( MODEM_LORA, ChanSet.tx_power ,0 , ChanSet.bandwidth, ChanSet.spread_factor, ChanSet.coding_rate,
