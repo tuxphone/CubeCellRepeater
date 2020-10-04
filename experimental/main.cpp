@@ -1,16 +1,23 @@
 #include <Arduino.h>
 #include "config.h"
 
-// CONFIGURATION: change values in config.h !
+// CONFIGURATION: 
+// Change RegionCode, Frequency, Speed in config.h !
 #define VERBOSE         // define to SILENT to turn off serial messages
-#define BLINK           // define to NOBLINK to turn off LED signaling
-#define OLED            // define to OLED to display messages on the OLED
-                        // OLED only supported for DevBoard Plus (HTCC-AB02)
+#define NOBLINK        // define to NOBLINK to turn off LED signaling
+#define NO_OLED        // define to NO_OLED to turn off display
+                       // OLED supported for cubecell_board_Plus (HTCC-AB02) and cubecell_gps (HTCC-AB02S)
+// :CONFIGURATION
 
-MeshPacket thePacket;
-ChannelSettings ChanSet;
+static MeshPacket thePacket;
+static ChannelSettings ChanSet;
 static RadioEvents_t RadioEvents;
-uint32_t lastreceivedID = 0x00000000;
+static TimerEvent_t CheckRadio;
+static uint32_t lastreceivedID = 0;
+//static uint32_t lpTime;
+static uint32_t dutyTime;
+static bool noTimer;
+static uint32_t startTime = 0;
 
 #ifndef NOBLINK
 #include "CubeCell_NeoPixel.h"
@@ -18,28 +25,34 @@ CubeCell_NeoPixel LED(1, RGB, NEO_GRB + NEO_KHZ800);
 #endif
 
 #ifndef NO_OLED
-#include "cubecell_SH1107Wire.h"
-SH1107Wire  display(0x3c, 500000, I2C_NUM_0,GEOMETRY_128_64,GPIO10 ); 
-char str[64];
+    #ifdef CubeCell_BoardPlus
+        #include "cubecell_SH1107Wire.h"
+        SH1107Wire  display(0x3c, 500000, I2C_NUM_0,GEOMETRY_128_64,GPIO10 ); 
+    #endif
+    #ifdef CubeCell_GPS
+        #include "cubecell_SSD1306Wire.h"
+        SSD1306Wire  display(0x3c, 500000, I2C_NUM_0,GEOMETRY_128_64,GPIO10 ); 
+    #endif
+char str[32];
 #endif
 
 void setup() {
+    TimerInit( &CheckRadio, onCheckRadio );
 #ifndef NO_OLED
     pinMode(Vext,OUTPUT);
     digitalWrite(Vext,LOW);
 #endif
 #ifndef NOBLINK
     pinMode(Vext,OUTPUT);
-    digitalWrite(Vext,LOW); //SET POWER
+    digitalWrite(Vext,LOW); 
     delay(100);
-    LED.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)
+    LED.begin();
     LED.clear( );
     LED.show();
 #endif
 #ifndef NO_OLED
     display.init();
     display.clear();
-    display.display();
     display.setTextAlignment(TEXT_ALIGN_LEFT);
     display.setFont(ArialMT_Plain_16);
     display.drawString(0,0,"CC Repeater");
@@ -49,16 +62,18 @@ void setup() {
     Serial.begin(115200);
     MSG("\nSetting up Radio:\n");
 #endif
-    RadioEvents.TxDone = TxDone;
-    RadioEvents.TxTimeout = TxTimeout;
-    RadioEvents.RxDone = RxDone;
+    RadioEvents.TxDone      = onTxDone;
+    RadioEvents.TxTimeout   = onTxTimeout;
+    RadioEvents.RxDone      = onRxDone;
+    RadioEvents.RxTimeout   = onRxTimeout;
+    RadioEvents.CadDone     = onCadDone;
     Radio.Init( &RadioEvents );
     Radio.Sleep();
-    memcpy(ChanSet.name, MESHTASTIC_NAME, 12);
-    //myRegion = &regions[REGION];    
+    memcpy(ChanSet.name, MESHTASTIC_NAME, 12);   
     ChanSet.channel_num = hash( MESHTASTIC_NAME ) % regions[REGION].numChannels; // see config.h
     ChanSet.tx_power    = (regions[REGION].powerLimit == 0) ? TX_MAX_POWER : MIN(regions[REGION].powerLimit, TX_MAX_POWER) ;
-    ChanSet.psk         = MESHTASTIC_PSK;
+    //ChanSet.psk         = MESHTASTIC_PSK;
+    ChanSet.psk         = PSK_NOENCRYPTION;
     /* FYI: 
     "bandwidth":
     [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: 62.5kHz, 4: 41.67kHz, 5: 31.25kHz, 6: 20.83kHz, 7: 15.63kHz, 8: 10.42kHz, 9: 7.81kHz]
@@ -75,32 +90,38 @@ void setup() {
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 1;    // = 4/5
             ChanSet.spread_factor = 7;
+            dutyTime = 10.24;  // 10 symbols 
             break;
         }
         case 1: {  // medium range 
             ChanSet.bandwidth = 2;      // 500 kHz
             ChanSet.coding_rate = 1;    // = 4/5
             ChanSet.spread_factor = 7;
+            dutyTime = 2.56;
             break;
         }
         case 2: {  // long range 
             ChanSet.bandwidth = 5;      // 31.25 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 9;
+            dutyTime = 163.84;
             break;
         }
         case 3: {  // very long range 
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 12;
+            dutyTime = 327.68;
             break;
         }
-        default:{  // default setting is medium range
-            ChanSet.bandwidth = 2;      // 500 kHz
-            ChanSet.coding_rate = 1;    // = 4/5
-            ChanSet.spread_factor = 7;
+        default:{  // default setting is very long range
+            ChanSet.bandwidth = 0;      // 125 kHz
+            ChanSet.coding_rate = 4;    // = 4/8
+            ChanSet.spread_factor = 12;
+            dutyTime = 327.68;
         }
     }
+    //lpTime = sleepTime[MESHTASTIC_SPEED];
     ConfigureRadio( ChanSet );
 #ifndef SILENT
     MSG("..done! Switch to Receive Mode.\n");
@@ -109,37 +130,52 @@ void setup() {
     display.drawString(0,32, "Receive Mode..");
     display.display();
 #endif
-    Radio.Rx(0);  // initial mode = receive
+    Radio.StartCad( 4 ); // length in symbols
 }
+
+void onCheckRadio(void){ noTimer=false; }
 
 void loop( )
 {
-    lowPowerHandler( ); 
-    delay(500);
-    Radio.IrqProcess( );
+    noTimer = true;
+    TimerSetValue( &CheckRadio, dutyTime ); // MCU sleeps 10 LoRa symbols
+    TimerStart( &CheckRadio );              // onCheckRadio() will set noTimer to false
+    while (noTimer) lowPowerHandler( ); 
+
+    Radio.IrqProcess();                     // handle events from LoRa, if CAD, set SX1262 to receive (onCadDone)
+    
+    if ( Radio.GetStatus() == RF_IDLE ) Radio.StartCad( 4 );
 }
 
-void TxDone( void )
+void onCadDone( bool ChannelActive ){
+    // Rx Time = 500 * symbol time should be longer than receive time for max. packet length
+    (ChannelActive) ? Radio.Rx( dutyTime * 50 ) : Radio.Sleep();
+}
+
+void onRxTimeout( void ){
+    Radio.Standby();
+}
+
+void onTxDone( void )
 {
-    Radio.Sleep( );
 #ifndef NOBLINK
     LED.clear( );
     LED.show( );
 #endif
 #ifndef SILENT
-    MSG(".done! Switch to Receive Mode.\n");
+MSG(".done (%ims)! Switch to Receive Mode.\n", millis() - startTime );
 #endif
 #ifndef NO_OLED
             sprintf(str,"..done. RX Mode..");
             display.drawString(42,53,str);
             display.display();
 #endif
-	Radio.Rx( 0 ); // switch to receive mode
+	//Radio.Rx( 0 ); // switch to receive mode
+    Radio.Standby();
 }
 
-void TxTimeout( void )
+void onTxTimeout( void )
 {
-    Radio.Sleep( );
 #ifndef NOBLINK
    LED.clear( );
    LED.show( );
@@ -152,18 +188,24 @@ void TxTimeout( void )
             display.drawString(42,53,str);
             display.display();
 #endif
-    Radio.Rx( 0 ); // switch to receive mode
+    Radio.Standby();
 }
 
-void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
+void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 {
-    Radio.Sleep( );
+   // if ( !(Radio.GetStatus() == RF_RX_RUNNING) ) Radio.Sleep( );
+   Radio.Sleep();
     if ( size > MAX_PAYLOAD_LENGTH ) size = MAX_PAYLOAD_LENGTH;
     if ( !(size > sizeof(PacketHeader)) ) {
         #ifndef SILENT
             MSG("\nReceived packet! (Size %i bytes, RSSI %i, SNR %i)\n", size, rssi, snr);
-            MSG("Packet to small (No MeshPacket), discard. Switch to Receive Mode.\n");
+            MSG("Packet to small (No MeshPacket).\n");
         #endif
+        #ifndef NOBLINK
+            LED.setPixelColor( 0, RGB_RED );    // send mode
+            LED.show();
+        #endif
+        Radio.Send( payload, size );
         Radio.Rx( 0 );
         return;
     }
@@ -180,16 +222,12 @@ void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
     memcpy(p->encrypted.bytes, payload + sizeof(PacketHeader), p->encrypted.size);
 #ifndef SILENT
     MSG("\nReceived packet! (Size %i bytes, RSSI %i, SNR %i)\n", size, rssi, snr);
-    MSG("TO: ");                HEXMSG(thePacket.to);
-    MSG("  FROM: ");            HEXMSG(thePacket.from);
-    MSG("  Packet ID: ");       HEXMSG(thePacket.id);
-    MSG("  Flags: WANT_ACK=");  MSG((thePacket.want_ack) ? "YES " : "NO ");
-    MSG(" HOP_LIMIT=%i\n",      thePacket.hop_limit);
-    MSG("Payload:");
-    for (int i=0; i<p->encrypted.size; i++){
-        MSG(" ");
-        HEXMSG(p->encrypted.bytes[i]);
-    }
+    MSG("TO: %.2X ",                p->to);
+    MSG("  FROM: %.2X ",            p->from);
+    MSG("  Packet ID: %.2X ",       p->id);
+    MSG("  Flags: WANT_ACK="); MSG((p->want_ack) ? "YES " : "NO ");
+    MSG(" HOP_LIMIT=%i\n",          p->hop_limit);
+    MSG("Payload:"); for ( int i=0; i < p->encrypted.size; i++ ) MSG(" %.2X", p->encrypted.bytes[i]);
     MSG("\n");
 #endif 
 #ifndef NO_OLED
@@ -198,32 +236,33 @@ void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
     display.setFont(ArialMT_Plain_10);
     sprintf(str,"Size: %i RSSI %i SNR %i", size, rssi, snr);
     display.drawString(0,0,str);
-    sprintf(str,"%X", thePacket.to);
+    sprintf(str,"%X", p->to);
     display.drawString(0,11,"TO:");
     display.drawString(40,11,str);
-    sprintf(str,"%X", thePacket.from);
+    sprintf(str,"%X", p->from);
     display.drawString(0,22,"FROM:");
     display.drawString(40,22,str);
-    sprintf(str,"%X", thePacket.id);
+    sprintf(str,"%X", p->id);
     display.drawString(0,32,"ID:");
     display.drawString(40,32,str);
     display.display();
 #endif
     if ( !(lastreceivedID == thePacket.id) ){ 
         // will repeat package
-        #ifndef SILENT
-            MSG("Sending packet.. (Size: %i)..", size);
-        #endif 
+        lastreceivedID = thePacket.id;
         #ifndef NO_OLED
             sprintf(str,"Sending..");
             display.drawString(0,53,str);
             display.display();
         #endif
-        lastreceivedID = thePacket.id;
         #ifndef NOBLINK
             LED.setPixelColor( 0, RGB_RED );    // send mode
             LED.show();
         #endif
+        #ifndef SILENT
+            MSG("Sending packet.. (Size: %i)..", size);
+            startTime = millis();
+        #endif 
         Radio.Send( payload, size );
      }
     else{
@@ -235,7 +274,7 @@ void RxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
             display.drawString(0,53,str);
             display.display();
         #endif
-        Radio.Rx( 0 ); // switch to Receive Mode
+        //Radio.Rx( 0 ); // switch to Receive Mode
     } 
 }
 
@@ -252,7 +291,6 @@ unsigned long hash(char *str)
 
 void ConfigureRadio( ChannelSettings ChanSet )
 {
-    //uint32_t freq = (myRegion->freq + myRegion->spacing * ChanSet.channel_num)*1E6;
     uint32_t freq = (regions[REGION].freq + regions[REGION].spacing * ChanSet.channel_num)*1E6;
     
     #ifndef SILENT
