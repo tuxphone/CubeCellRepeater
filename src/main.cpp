@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include "config.h"
-//#include "sx126x.h"
-//#include "asr_board.c"
+
 // CONFIGURATION: 
 // Change RegionCode, Frequency, Speed in config.h !
 #define VERBOSE         // define to SILENT to turn off serial messages
@@ -13,13 +12,11 @@
 static MeshPacket thePacket;
 static ChannelSettings ChanSet;
 static RadioEvents_t RadioEvents;
-//static TimerEvent_t CheckRadio;
 static uint32_t lastreceivedID  = 0;
 static uint32_t startTime       = 0;
 static uint32_t symbolTime;
 static uint32_t sleepTime;
 static uint32_t rxTime;
-//static bool noTimer;
 static bool flag_No_Cycle = false;
 
 
@@ -69,7 +66,6 @@ void setup() {
     RadioEvents.TxTimeout   = onTxTimeout;
     RadioEvents.RxDone      = onRxDone;
     Radio.Init( &RadioEvents );
-    //Radio.Sleep();
     memcpy(ChanSet.name, MESHTASTIC_NAME, 12);   
     ChanSet.channel_num = hash( MESHTASTIC_NAME ) % regions[REGION].numChannels; // see config.h
     ChanSet.tx_power    = (regions[REGION].powerLimit == 0) ? TX_MAX_POWER : MIN(regions[REGION].powerLimit, TX_MAX_POWER) ;
