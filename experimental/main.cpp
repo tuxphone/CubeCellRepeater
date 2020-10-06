@@ -121,7 +121,6 @@ void setup() {
             dutyTime = 327.68;
         }
     }
-    //lpTime = sleepTime[MESHTASTIC_SPEED];
     ConfigureRadio( ChanSet );
 #ifndef SILENT
     MSG("..done! Switch to Receive Mode.\n");
@@ -135,6 +134,12 @@ void setup() {
 
 void onCheckRadio(void){ noTimer=false; }
 
+// Cycle starts @ 0 symbols. LoRA: CAD for 4 symbols, then (implicitly) Standby  MCU: sleep
+// After 10 LoRa symbols, wake up MCU and check for IRQs from LoRa (including CADdone)
+// If channel activiy detected, switch to RX mode for 500 symbols, to capture very long packages.
+// If the package is short, the onRXDone handler will put the LoRa to sleep, so no excess power consumption
+// Radio.Send() is non-blocking, so if a TX is running we cannot immediatly start a new CAD, so we wait until LoRa is idle
+ 
 void loop( )
 {
     noTimer = true;
@@ -149,7 +154,7 @@ void loop( )
 
 void onCadDone( bool ChannelActive ){
     // Rx Time = 500 * symbol time should be longer than receive time for max. packet length
-    (ChannelActive) ? Radio.Rx( dutyTime * 50 ) : Radio.Sleep();
+    (ChannelActive) ? Radio.Rx( dutyTime * 50 ) : Radio.Standby();
 }
 
 void onRxTimeout( void ){
@@ -274,7 +279,7 @@ void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
             display.drawString(0,53,str);
             display.display();
         #endif
-        //Radio.Rx( 0 ); // switch to Receive Mode
+        Radio.Standby();
     } 
 }
 
