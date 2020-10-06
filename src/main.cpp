@@ -1,10 +1,11 @@
 #include <Arduino.h>
 #include "config.h"
-
+//#include "sx126x.h"
+//#include "asr_board.c"
 // CONFIGURATION: 
 // Change RegionCode, Frequency, Speed in config.h !
 #define VERBOSE         // define to SILENT to turn off serial messages
-#define BLINK        // define to NOBLINK to turn off LED signaling
+#define NOBLINK        // define to NOBLINK to turn off LED signaling
 #define NO_OLED        // define to NO_OLED to turn off display
                        // OLED supported for cubecell_board_Plus (HTCC-AB02) and cubecell_gps (HTCC-AB02S)
 // :CONFIGURATION
@@ -12,11 +13,15 @@
 static MeshPacket thePacket;
 static ChannelSettings ChanSet;
 static RadioEvents_t RadioEvents;
-static TimerEvent_t CheckRadio;
-static uint32_t lastreceivedID = 0;
-static uint32_t airTime;
-static bool noTimer;
-static uint32_t startTime = 0;
+//static TimerEvent_t CheckRadio;
+static uint32_t lastreceivedID  = 0;
+static uint32_t startTime       = 0;
+static uint32_t symbolTime;
+static uint32_t sleepTime;
+static uint32_t rxTime;
+//static bool noTimer;
+static bool flag_No_Cycle = false;
+
 
 #ifndef NOBLINK
 #include "CubeCell_NeoPixel.h"
@@ -36,7 +41,6 @@ char str[32];
 #endif
 
 void setup() {
-    TimerInit( &CheckRadio, onCheckRadio );
 #ifndef NO_OLED
     pinMode(Vext,OUTPUT);
     digitalWrite(Vext,LOW);
@@ -52,7 +56,6 @@ void setup() {
 #ifndef NO_OLED
     display.init();
     display.clear();
-    display.display();
     display.setTextAlignment(TEXT_ALIGN_LEFT);
     display.setFont(ArialMT_Plain_16);
     display.drawString(0,0,"CC Repeater");
@@ -60,13 +63,13 @@ void setup() {
 #endif
 #ifndef SILENT
     Serial.begin(115200);
-    MSG("\nSetting up Radio:\n");
+    MSG("\n***********************************************************\nSetting up Radio:\n");
 #endif
-    RadioEvents.TxDone = onTxDone;
-    RadioEvents.TxTimeout = onTxTimeout;
-    RadioEvents.RxDone = onRxDone;
+    RadioEvents.TxDone      = onTxDone;
+    RadioEvents.TxTimeout   = onTxTimeout;
+    RadioEvents.RxDone      = onRxDone;
     Radio.Init( &RadioEvents );
-    Radio.Sleep();
+    //Radio.Sleep();
     memcpy(ChanSet.name, MESHTASTIC_NAME, 12);   
     ChanSet.channel_num = hash( MESHTASTIC_NAME ) % regions[REGION].numChannels; // see config.h
     ChanSet.tx_power    = (regions[REGION].powerLimit == 0) ? TX_MAX_POWER : MIN(regions[REGION].powerLimit, TX_MAX_POWER) ;
@@ -88,78 +91,80 @@ void setup() {
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 1;    // = 4/5
             ChanSet.spread_factor = 7;
+            symbolTime = 1024;  // in micro seconds! 
             break;
         }
         case 1: {  // medium range 
             ChanSet.bandwidth = 2;      // 500 kHz
             ChanSet.coding_rate = 1;    // = 4/5
             ChanSet.spread_factor = 7;
+            symbolTime = 256;
             break;
         }
         case 2: {  // long range 
             ChanSet.bandwidth = 5;      // 31.25 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 9;
+            symbolTime = 16384;
             break;
         }
         case 3: {  // very long range 
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 12;
+            symbolTime = 32768;
             break;
         }
-        default:{  // default setting is medium range
-            ChanSet.bandwidth = 2;      // 500 kHz
-            ChanSet.coding_rate = 1;    // = 4/5
-            ChanSet.spread_factor = 7;
+        default:{  // default setting is very long range
+            ChanSet.bandwidth = 0;      // 125 kHz
+            ChanSet.coding_rate = 4;    // = 4/8
+            ChanSet.spread_factor = 12;
+            symbolTime = 32768;
         }
     }
-    airTime = sleepTime[MESHTASTIC_SPEED];
     ConfigureRadio( ChanSet );
 #ifndef SILENT
-    MSG("..done! Switch to Receive Mode.\n");
+    MSG("\n..done! Switch to Receive Mode.\n***********************************************************\n");
 #endif
 #ifndef NO_OLED
     display.drawString(0,32, "Receive Mode..");
     display.display();
 #endif
-    Radio.Rx(0);  // initial mode = receive
-}
-
-void onCheckRadio(void){    
-    noTimer=false;
+    setRxCycle();
 }
 
 void loop( )
 {
-    noTimer = true;
-    TimerSetValue( &CheckRadio, airTime );  // ms
-    TimerStart( &CheckRadio );              // onCheckRadio() will set noTimer to false
-    while (noTimer) lowPowerHandler( ); 
-    Radio.IrqProcess();                     // handle events from LoRa
+    while ( !(Radio.GetStatus() == RF_IDLE) ) {
+        for (uint8_t i = 0; i<6; i++) lowPowerHandler();
+        Radio.IrqProcess();
+    }
+    setRxCycle();
+}
+
+void setRxCycle(void){
+    (flag_No_Cycle) ? Radio.Rx( 0 ) : Radio.SetRxDutyCycle( rxTime, sleepTime );
 }
 
 void onTxDone( void )
 {
-    Radio.Sleep( );
 #ifndef NOBLINK
     LED.clear( );
     LED.show( );
 #endif
 #ifndef SILENT
-MSG(".done (%ims)! Switch to Receive Mode.\n", millis() - startTime );
+    MSG(".done (%ims)! Switch to Receive Mode.\n", millis() - startTime );
 #endif
 #ifndef NO_OLED
-            sprintf(str,"..done. RX Mode..");
-            display.drawString(42,53,str);
-            display.display();
+    sprintf(str,"..done. RX Mode..");
+    display.drawString(42,53,str);
+    display.display();
 #endif
-	Radio.Rx( 0 ); // switch to receive mode
+    Radio.Standby();
 }
 
 void onTxTimeout( void )
 {
-    Radio.Sleep( );
 #ifndef NOBLINK
    LED.clear( );
    LED.show( );
@@ -172,12 +177,11 @@ void onTxTimeout( void )
             display.drawString(42,53,str);
             display.display();
 #endif
-    Radio.Rx( 0 ); // switch to receive mode
+    Radio.Standby();
 }
 
 void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 {
-    if ( !(Radio.GetStatus() == RF_RX_RUNNING) ) Radio.Sleep( );
     if ( size > MAX_PAYLOAD_LENGTH ) size = MAX_PAYLOAD_LENGTH;
     if ( !(size > sizeof(PacketHeader)) ) {
         #ifndef SILENT
@@ -189,7 +193,7 @@ void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
             LED.show();
         #endif
         Radio.Send( payload, size );
-        Radio.Rx( 0 );
+        Radio.Standby();
         return;
     }
     PacketHeader * h = (PacketHeader *)payload;
@@ -257,7 +261,6 @@ void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
             display.drawString(0,53,str);
             display.display();
         #endif
-        Radio.Rx( 0 ); // switch to Receive Mode
     } 
 }
 
@@ -275,20 +278,39 @@ unsigned long hash(char *str)
 void ConfigureRadio( ChannelSettings ChanSet )
 {
     uint32_t freq = (regions[REGION].freq + regions[REGION].spacing * ChanSet.channel_num)*1E6;
-    
     #ifndef SILENT
     MSG("\nRegion is: %s", regions[REGION].name);
     MSG("  TX power: %i\n", ChanSet.tx_power);
     MSG("Setting frequency to %i Hz (meshtastic channel %i) .. \n",freq,ChanSet.channel_num );
     MSG("Channel name is: %s .. \n", ChanSet.name );
-    MSG("Setting bandwidth to index %i ..\n",ChanSet.bandwidth);
+    MSG("Setting bandwidth to index %i (%ikHz)..\n", ChanSet.bandwidth, TheBandwidths[ChanSet.bandwidth]);
     MSG("Setting CodeRate to index %i .. \n", ChanSet.coding_rate);
     MSG("Setting SpreadingFactor to %i ..\n",ChanSet.spread_factor);
-    MSG("LowPowerTime: %ims ..\n", airTime);
     #endif
     Radio.SetChannel( freq );
     Radio.SetTxConfig( MODEM_LORA, ChanSet.tx_power ,0 , ChanSet.bandwidth, ChanSet.spread_factor, ChanSet.coding_rate,
                                    LORA_PREAMBLE_LENGTH, false, true, false, 0, false, 20000 );
     Radio.SetRxConfig( MODEM_LORA, ChanSet.bandwidth, ChanSet.spread_factor, ChanSet.coding_rate, 0, LORA_PREAMBLE_LENGTH,
                                    LORA_SYMBOL_TIMEOUT, false , 0, true, false, 0, false, true );
+
+    // SET UP RX_DUTY_CYCLE:
+    #define RXSYMBOLS 8   // Minimum count of symbols to reliably detect a LoRa preamble in rx mode. Should not be lower than 6.
+    if ( (LORA_PREAMBLE_LENGTH + 4.5) < (2 * RXSYMBOLS + 1 ) ) // 4.5 symbols are added to the user set preamble by the Sx1262
+    {  
+        #ifndef SILENT
+            MSG("Short Preamble, will not use RxDutyCycle!\n");
+        #endif
+        flag_No_Cycle = true;
+        return;
+    }
+    uint32_t preambTime = symbolTime * (LORA_PREAMBLE_LENGTH + 4.5); // micro secs. 
+    rxTime = 2 * RXSYMBOLS * symbolTime; 
+    sleepTime = preambTime - rxTime - 1000; // SX1262 needs 500 micro sec for each sleep/wake transition
+    if (preambTime < (2* rxTime + sleepTime) ) flag_No_Cycle = true;
+    #ifndef SILENT
+    MSG("Will use RxDutyCycle: %s\n", (flag_No_Cycle) ? "YES" : "NO" );
+    MSG("RX time: %u micro s   sleep time: %u micro s\n", rxTime, sleepTime);
+    #endif
+    rxTime = (rxTime * 125) >> 3;  // * 15.768 micro s  (125/8 is 15.768) 
+    sleepTime = (sleepTime * 125) >> 3;
 }
