@@ -32,21 +32,19 @@ typedef enum _RegionCode {
 #define MESHTASTIC_PSK      { 0x10, 0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0xbf }
 #define PSK_NOENCRYPTION    { 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
 
-// sleep times @ speed   0    1   2     3
-uint32_t sleepTime[] = { 77, 20, 1512, 2499 };
-
 typedef struct {
     uint32_t to, from, id; 
     uint8_t flags;      // The bottom three bits of flags are used to store hop_limit, bit 4 is the WANT_ACK flag
 } PacketHeader;
 
 #define MSG(...)    Serial.printf(__VA_ARGS__)
+//#define DUTY(symbTime) ( (uint32_t)( symbTime * LORA_PREAMBLE_LENGTH / 2 ) ) 
 
 void onTxDone( void );
 void onTxTimeout( void );
 void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr );
-void onCheckRadio(void);
 void ConfigureRadio( ChannelSettings ChanSet );
+void setRxCycle(void);
 unsigned long hash(char *str);
 
 
@@ -76,3 +74,6 @@ const RegionInfo regions[] = {
                                        // freq. (921.9f is for download, others are for uplink)
     RDEF(TW, 923.0f, 0.2f, 10, 0)     // TW channel settings (AS2 bandplan 923-925MHz)
 };
+
+// Bandwidths. Array is specific to the Radio.c of the CubeCells
+const uint32_t TheBandwidths[] = { 125E3, 250E3, 500E3, 62500, 41670, 31250, 20830, 15630, 10420, 7810 };
