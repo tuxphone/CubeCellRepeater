@@ -14,8 +14,7 @@ static ChannelSettings ChanSet;
 static RadioEvents_t RadioEvents;
 static TimerEvent_t CheckRadio;
 static uint32_t lastreceivedID = 0;
-//static uint32_t lpTime;
-static uint32_t dutyTime;
+static uint32_t sleepTime;
 static bool noTimer;
 static uint32_t startTime = 0;
 
@@ -90,37 +89,33 @@ void setup() {
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 1;    // = 4/5
             ChanSet.spread_factor = 7;
-            dutyTime = 10.24;  // 10 symbols 
             break;
         }
         case 1: {  // medium range 
             ChanSet.bandwidth = 2;      // 500 kHz
             ChanSet.coding_rate = 1;    // = 4/5
             ChanSet.spread_factor = 7;
-            dutyTime = 2.56;
             break;
         }
         case 2: {  // long range 
             ChanSet.bandwidth = 5;      // 31.25 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 9;
-            dutyTime = 163.84;
             break;
         }
         case 3: {  // very long range 
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 12;
-            dutyTime = 327.68;
             break;
         }
         default:{  // default setting is very long range
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 12;
-            dutyTime = 327.68;
         }
     }
+    sleepTime = floor( 10 * ((1<< ChanSet.spread_factor)*1000 +32) / TheBandwidths[ChanSet.bandwidth]  + 0.5 );
     ConfigureRadio( ChanSet );
 #ifndef SILENT
     MSG("..done! Switch to Receive Mode.\n");
@@ -132,7 +127,10 @@ void setup() {
     Radio.StartCad( 4 ); // length in symbols
 }
 
-void onCheckRadio(void){ noTimer=false; }
+void onCheckRadio(void)
+{ 
+    noTimer=false;
+}
 
 // Cycle starts @ 0 symbols. LoRA: CAD for 4 symbols, then (implicitly) Standby  MCU: sleep
 // After 10 LoRa symbols, wake up MCU and check for IRQs from LoRa (including CADdone)
@@ -143,7 +141,7 @@ void onCheckRadio(void){ noTimer=false; }
 void loop( )
 {
     noTimer = true;
-    TimerSetValue( &CheckRadio, dutyTime ); // MCU sleeps 10 LoRa symbols
+    TimerSetValue( &CheckRadio, sleepTime ); // MCU sleeps 10 LoRa symbols
     TimerStart( &CheckRadio );              // onCheckRadio() will set noTimer to false
     while (noTimer) lowPowerHandler( ); 
 
@@ -154,11 +152,11 @@ void loop( )
 
 void onCadDone( bool ChannelActive ){
     // Rx Time = 500 * symbol time should be longer than receive time for max. packet length
-    (ChannelActive) ? Radio.Rx( dutyTime * 50 ) : Radio.Standby();
+    (ChannelActive) ? Radio.Rx( sleepTime * 50 ) : Radio.Sleep();
 }
 
 void onRxTimeout( void ){
-    Radio.Standby();
+    Radio.Sleep();
 }
 
 void onTxDone( void )
@@ -175,8 +173,7 @@ MSG(".done (%ims)! Switch to Receive Mode.\n", millis() - startTime );
             display.drawString(42,53,str);
             display.display();
 #endif
-	//Radio.Rx( 0 ); // switch to receive mode
-    Radio.Standby();
+    Radio.Sleep();
 }
 
 void onTxTimeout( void )
@@ -193,13 +190,12 @@ void onTxTimeout( void )
             display.drawString(42,53,str);
             display.display();
 #endif
-    Radio.Standby();
+    Radio.Sleep();
 }
 
 void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 {
-   // if ( !(Radio.GetStatus() == RF_RX_RUNNING) ) Radio.Sleep( );
-   Radio.Sleep();
+    Radio.Sleep();
     if ( size > MAX_PAYLOAD_LENGTH ) size = MAX_PAYLOAD_LENGTH;
     if ( !(size > sizeof(PacketHeader)) ) {
         #ifndef SILENT
@@ -279,7 +275,6 @@ void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
             display.drawString(0,53,str);
             display.display();
         #endif
-        Radio.Standby();
     } 
 }
 
@@ -297,14 +292,13 @@ unsigned long hash(char *str)
 void ConfigureRadio( ChannelSettings ChanSet )
 {
     uint32_t freq = (regions[REGION].freq + regions[REGION].spacing * ChanSet.channel_num)*1E6;
-    
     #ifndef SILENT
     MSG("\nRegion is: %s", regions[REGION].name);
     MSG("  TX power: %i\n", ChanSet.tx_power);
     MSG("Setting frequency to %i Hz (meshtastic channel %i) .. \n",freq,ChanSet.channel_num );
-    MSG("Channel name is: %s .. \n", ChanSet.name );
-    MSG("Setting bandwidth to index %i ..\n",ChanSet.bandwidth);
-    MSG("Setting CodeRate to index %i .. \n", ChanSet.coding_rate);
+    MSG("Channel name is: '%s' .. \n", ChanSet.name );
+    MSG("Setting bandwidth to index  %i (%ikHz)..\n", ChanSet.bandwidth, TheBandwidths[ChanSet.bandwidth]  );
+    MSG("Setting CodeRate  to index  %i (4/%i).. \n",  ChanSet.coding_rate, ChanSet.coding_rate + 4 );
     MSG("Setting SpreadingFactor to %i ..\n",ChanSet.spread_factor);
     #endif
     Radio.SetChannel( freq );

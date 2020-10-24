@@ -2,7 +2,7 @@
 // CONFIGURATION:
 #define REGION   RegionCode_EU865   // define your region here. For US, RegionCode_US, CN RegionCode_Cn etc.
 char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
-#define MESHTASTIC_SPEED  2     // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
+#define MESHTASTIC_SPEED  3     // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
 #define TX_MAX_POWER     14     // max output power in dB, keep in mind the maximums set by law and the hardware
 // :CONFIGURATION
 
@@ -31,9 +31,6 @@ typedef enum _RegionCode {
 // the PSK is not used for encryption/decryption, you can leave it as it is
 #define MESHTASTIC_PSK      { 0x10, 0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0xbf }
 #define PSK_NOENCRYPTION    { 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
-
-// sleep times @ speed   0    1   2     3
-uint32_t sleepTime[] = { 77, 20, 1512, 2499 };
 
 typedef struct {
     uint32_t to, from, id; 
@@ -79,3 +76,6 @@ const RegionInfo regions[] = {
                                        // freq. (921.9f is for download, others are for uplink)
     RDEF(TW, 923.0f, 0.2f, 10, 0)     // TW channel settings (AS2 bandplan 923-925MHz)
 };
+
+// Bandwidths and CodeRate. Arrays are specific to the Radio.c of the CubeCells
+const uint32_t TheBandwidths[] = { 125E3, 250E3, 500E3, 62500, 41670, 31250, 20830, 15630, 10420, 7810 };
