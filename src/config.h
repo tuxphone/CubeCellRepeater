@@ -1,10 +1,21 @@
-#include "mesh.pb.h"
 // CONFIGURATION:
-#define REGION   RegionCode_EU865   // define your region here. For US, RegionCode_US, CN RegionCode_Cn etc.
-char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
-#define MESHTASTIC_SPEED  3     // 0 = short range, 1 = medium range, 2 = long range, 3 = very long range
-#define TX_MAX_POWER     14     // max output power in dB, keep in mind the maximums set by law and the hardware
+#define REGION          RegionCode_EU865   // define your region here. For US, RegionCode_US, CN RegionCode_Cn etc.
+#define TX_MAX_POWER    14     // max output power in dB, keep in mind the maximums set by law and the hardware
+char MeshtasticLink[] = "https://www.meshtastic.org/c/#GAMiENTxuzogKQdZ8Lz_q89Oab8qB0RlZmF1bHQ=" ;
 // :CONFIGURATION
+
+/*  RegionCodes:
+
+    RegionCode_Unset
+    RegionCode_US
+    RegionCode_EU433
+    RegionCode_EU865
+    RegionCode_CN
+    RegionCode_JP
+    RegionCode_ANZ
+    RegionCode_KR
+    RegionCode_TW 
+*/
 
 #define RGB_GREEN                   0x000300    // receive mode  --- not longer used 
 #define RGB_RED                     0x030000    // send mode
@@ -14,39 +25,26 @@ char    MESHTASTIC_NAME[12] = {"Default"}; // Channel Name, but without "-Xy" su
 #define RX_TIMEOUT_VALUE            1000
 #define MAX_PAYLOAD_LENGTH          0xFF        // max payload (see  \cores\asr650x\device\asr6501_lrwan\radio.c  --> MaxPayloadLength)
 
-/* possible RegionCodes, from mesh.pb.h:
-typedef enum _RegionCode {
-    RegionCode_Unset = 0,
-    RegionCode_US = 1,
-    RegionCode_EU433 = 2,
-    RegionCode_EU865 = 3,
-    RegionCode_CN = 4,
-    RegionCode_JP = 5,
-    RegionCode_ANZ = 6,
-    RegionCode_KR = 7,
-    RegionCode_TW = 8
-} RegionCode;
-*/
-
-// the PSK is not used for encryption/decryption, you can leave it as it is
-#define MESHTASTIC_PSK      { 0x10, 0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0xbf }
-#define PSK_NOENCRYPTION    { 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+#include "mesh.pb.h"
+#include "mesh-pb-constants.h"
 
 typedef struct {
     uint32_t to, from, id; 
     uint8_t flags;      // The bottom three bits of flags are used to store hop_limit, bit 4 is the WANT_ACK flag
 } PacketHeader;
 
-#define MSG(...)    Serial.printf(__VA_ARGS__)
-//#define DUTY(symbTime) ( (uint32_t)( symbTime * LORA_PREAMBLE_LENGTH / 2 ) ) 
+#define MSG(...)    Serial.printf(__VA_ARGS__) 
+#define LINE( count, c) { for (uint8_t i=0; i<count; i++ ) { Serial.print(c); } Serial.println();  } 
 
 void onTxDone( void );
+void onCadDone( bool ChannelActive );
+void onRxTimeout( void );
 void onTxTimeout( void );
 void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr );
+void onCheckRadio( void );
 void ConfigureRadio( ChannelSettings ChanSet );
-void setRxCycle(void);
-unsigned long hash(char *str);
-
+void MCU_deepsleep( void );
+unsigned long hash( char *str );
 
 // from Meshtastic project: MeshRadio.h , RadioInterface.cpp
 #define RDEF(name, freq, spacing, num_ch, power_limit)                                                                           \
@@ -75,5 +73,7 @@ const RegionInfo regions[] = {
     RDEF(TW, 923.0f, 0.2f, 10, 0)     // TW channel settings (AS2 bandplan 923-925MHz)
 };
 
-// Bandwidths. Array is specific to the Radio.c of the CubeCells
+// Bandwidths array is specific to the Radio.c of the CubeCell boards
 const uint32_t TheBandwidths[] = { 125E3, 250E3, 500E3, 62500, 41670, 31250, 20830, 15630, 10420, 7810 };
+
+

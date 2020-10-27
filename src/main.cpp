@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include "config.h"
+#include <Base64.h>
+#include "cyPm.c"
 
 // CONFIGURATION: 
 // Change RegionCode, Frequency, Speed in config.h !
@@ -9,16 +11,14 @@
                        // OLED supported for cubecell_board_Plus (HTCC-AB02) and cubecell_gps (HTCC-AB02S)
 // :CONFIGURATION
 
-static MeshPacket thePacket;
-static ChannelSettings ChanSet;
-static RadioEvents_t RadioEvents;
-static uint32_t lastreceivedID  = 0;
-static uint32_t startTime       = 0;
-static uint32_t symbolTime;
-static uint32_t sleepTime;
-static uint32_t rxTime;
-static bool flag_No_Cycle = false;
-
+static MeshPacket       thePacket;
+static ChannelSettings  ChanSet;
+static RadioEvents_t    RadioEvents;
+static TimerEvent_t     CheckRadio;
+static uint32_t         lastreceivedID = 0;
+static uint32_t         symbolTime;
+static uint32_t         sendTime;
+extern uint32_t         systime;   // global system time count --> millis()
 
 #ifndef NOBLINK
 #include "CubeCell_NeoPixel.h"
@@ -38,6 +38,7 @@ char str[32];
 #endif
 
 void setup() {
+    TimerInit( &CheckRadio, onCheckRadio );
 #ifndef NO_OLED
     pinMode(Vext,OUTPUT);
     digitalWrite(Vext,LOW);
@@ -60,17 +61,24 @@ void setup() {
 #endif
 #ifndef SILENT
     Serial.begin(115200);
-    MSG("\n***********************************************************\nSetting up Radio:\n");
+    MSG("\n");
+    LINE(60, "*");
+    MSG("Setting up Radio:\n");
 #endif
     RadioEvents.TxDone      = onTxDone;
     RadioEvents.TxTimeout   = onTxTimeout;
     RadioEvents.RxDone      = onRxDone;
+    RadioEvents.RxTimeout   = onRxTimeout;
+    RadioEvents.CadDone     = onCadDone;
     Radio.Init( &RadioEvents );
-    memcpy(ChanSet.name, MESHTASTIC_NAME, 12);   
-    ChanSet.channel_num = hash( MESHTASTIC_NAME ) % regions[REGION].numChannels; // see config.h
+    Radio.Sleep();
+    // import Channel Settings from Meshtastic Link (channel name, modem config):
+    char decoded[Base64.decodedLength(&MeshtasticLink[30], sizeof(MeshtasticLink)-30)];
+    Base64.decode(decoded, &MeshtasticLink[30], sizeof(MeshtasticLink)-30);
+    pb_decode_from_bytes((uint8_t *)&decoded[0], sizeof(decoded), ChannelSettings_fields, &ChanSet);
+    // done, populate remaining settings according to channel name and provided modem config
+    ChanSet.channel_num = hash( ChanSet.name ) % regions[REGION].numChannels; // see config.h
     ChanSet.tx_power    = (regions[REGION].powerLimit == 0) ? TX_MAX_POWER : MIN(regions[REGION].powerLimit, TX_MAX_POWER) ;
-    //ChanSet.psk         = MESHTASTIC_PSK;
-    ChanSet.psk         = PSK_NOENCRYPTION;
     /* FYI: 
     "bandwidth":
     [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: 62.5kHz, 4: 41.67kHz, 5: 31.25kHz, 6: 20.83kHz, 7: 15.63kHz, 8: 10.42kHz, 9: 7.81kHz]
@@ -82,64 +90,79 @@ void setup() {
     "coding rate":
         [1: 4/5, 2: 4/6, 3: 4/7, 4: 4/8]
     */
-    switch ( MESHTASTIC_SPEED ){
+    switch ( (uint8_t)ChanSet.modem_config ){
         case 0: {  // short range 
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 1;    // = 4/5
             ChanSet.spread_factor = 7;
-            symbolTime = 1024;  // in micro seconds! 
             break;
         }
         case 1: {  // medium range 
             ChanSet.bandwidth = 2;      // 500 kHz
             ChanSet.coding_rate = 1;    // = 4/5
             ChanSet.spread_factor = 7;
-            symbolTime = 256;
             break;
         }
         case 2: {  // long range 
             ChanSet.bandwidth = 5;      // 31.25 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 9;
-            symbolTime = 16384;
             break;
         }
         case 3: {  // very long range 
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 12;
-            symbolTime = 32768;
             break;
         }
         default:{  // default setting is very long range
             ChanSet.bandwidth = 0;      // 125 kHz
             ChanSet.coding_rate = 4;    // = 4/8
             ChanSet.spread_factor = 12;
-            symbolTime = 32768;
         }
     }
+    symbolTime =  ((1<< ChanSet.spread_factor)*1000 +32) *1000 / TheBandwidths[ChanSet.bandwidth]; // in micro seconds!
     ConfigureRadio( ChanSet );
 #ifndef SILENT
-    MSG("\n..done! Switch to Receive Mode.\n***********************************************************\n");
+    MSG("\n..done!\n");
+    LINE(60,"*");
 #endif
 #ifndef NO_OLED
     display.drawString(0,32, "Receive Mode..");
     display.display();
 #endif
-    setRxCycle();
+    TimerSetValue( &CheckRadio, symbolTime / 100 ); // MCU sleeps 10 LoRa symbols (in milli seconds)
+    TimerStart( &CheckRadio );                      // onCheckRadio() will break deep sleep mode
+    Radio.StartCad( 3 ); // length in symbols
 }
 
+void onCheckRadio(void)
+{ 
+    TimerReset(&CheckRadio);
+}
+
+// Cycle starts @ 0 symbols. LoRA: CAD for x symbols, then (implicitly) Standby  MCU: sleep
+// After 10 LoRa symbols, wake up MCU and check for IRQs from LoRa (including CADdone)
+// If channel activiy detected, switch to RX mode for 500 symbols, to capture very long packages.
+// If the package is shorter, the onRXDone handler will put the LoRa to sleep, so no excess power consumption
+// Radio.Send() is non-blocking, so if a TX is running we cannot immediatly start a new CAD. We wait (sleep) until LoRa is idle.
+ 
 void loop( )
 {
-    while ( !(Radio.GetStatus() == RF_IDLE) ) {
-        for (uint8_t i = 0; i<6; i++) lowPowerHandler();
-        Radio.IrqProcess();
-    }
-    setRxCycle();
+    
+    MCU_deepsleep( );
+    Radio.IrqProcess(); // handle events from LoRa, if CAD, set SX1262 to receive (onCadDone)
+    if ( Radio.GetStatus() == RF_IDLE ) Radio.StartCad( 3 ); // (in symbols)
+    
 }
 
-void setRxCycle(void){
-    (flag_No_Cycle) ? Radio.Rx( 0 ) : Radio.SetRxDutyCycle( rxTime, sleepTime );
+void onCadDone( bool ChannelActive ){
+    // Rx Time = 500 * symbol time (in ms) should be longer than receive time for max. packet length 
+    (ChannelActive) ? Radio.Rx( symbolTime >> 1 ) : Radio.Sleep();
+}
+
+void onRxTimeout( void ){
+    Radio.Sleep();
 }
 
 void onTxDone( void )
@@ -149,14 +172,14 @@ void onTxDone( void )
     LED.show( );
 #endif
 #ifndef SILENT
-    MSG(".done (%ims)! Switch to Receive Mode.\n", millis() - startTime );
+MSG(".done (%ims)! Switch to Receive Mode.\n", millis() - sendTime );
 #endif
 #ifndef NO_OLED
-    sprintf(str,"..done. RX Mode..");
-    display.drawString(42,53,str);
-    display.display();
+            sprintf(str,"..done. RX Mode..");
+            display.drawString(42,53,str);
+            display.display();
 #endif
-    Radio.Standby();
+    Radio.Sleep();
 }
 
 void onTxTimeout( void )
@@ -173,11 +196,12 @@ void onTxTimeout( void )
             display.drawString(42,53,str);
             display.display();
 #endif
-    Radio.Standby();
+    Radio.Sleep();
 }
 
 void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 {
+    Radio.Sleep();
     if ( size > MAX_PAYLOAD_LENGTH ) size = MAX_PAYLOAD_LENGTH;
     if ( !(size > sizeof(PacketHeader)) ) {
         #ifndef SILENT
@@ -189,7 +213,7 @@ void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
             LED.show();
         #endif
         Radio.Send( payload, size );
-        Radio.Standby();
+        Radio.Rx( 0 );
         return;
     }
     PacketHeader * h = (PacketHeader *)payload;
@@ -243,8 +267,8 @@ void onRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
             LED.show();
         #endif
         #ifndef SILENT
-            MSG("Sending packet.. (Size: %i)..", size);
-            startTime = millis();
+            MSG("Sending packet..");
+            sendTime = millis();
         #endif 
         Radio.Send( payload, size );
      }
@@ -277,36 +301,30 @@ void ConfigureRadio( ChannelSettings ChanSet )
     #ifndef SILENT
     MSG("\nRegion is: %s", regions[REGION].name);
     MSG("  TX power: %i\n", ChanSet.tx_power);
+    MSG("Channel name is: '%s' .. \n", ChanSet.name );
     MSG("Setting frequency to %i Hz (meshtastic channel %i) .. \n",freq,ChanSet.channel_num );
-    MSG("Channel name is: %s .. \n", ChanSet.name );
-    MSG("Setting bandwidth to index %i (%ikHz)..\n", ChanSet.bandwidth, TheBandwidths[ChanSet.bandwidth]);
-    MSG("Setting CodeRate to index %i .. \n", ChanSet.coding_rate);
+    MSG("Setting bandwidth to index  %i (%ikHz)..\n", ChanSet.bandwidth, TheBandwidths[ChanSet.bandwidth]  );
+    MSG("Setting CodeRate  to index  %i (4/%i).. \n",  ChanSet.coding_rate, ChanSet.coding_rate + 4 );
     MSG("Setting SpreadingFactor to %i ..\n",ChanSet.spread_factor);
+    MSG("Symboltime is %i micro s ..\n", symbolTime );
     #endif
     Radio.SetChannel( freq );
     Radio.SetTxConfig( MODEM_LORA, ChanSet.tx_power ,0 , ChanSet.bandwidth, ChanSet.spread_factor, ChanSet.coding_rate,
                                    LORA_PREAMBLE_LENGTH, false, true, false, 0, false, 20000 );
     Radio.SetRxConfig( MODEM_LORA, ChanSet.bandwidth, ChanSet.spread_factor, ChanSet.coding_rate, 0, LORA_PREAMBLE_LENGTH,
                                    LORA_SYMBOL_TIMEOUT, false , 0, true, false, 0, false, true );
+}
 
-    // SET UP RX_DUTY_CYCLE:
-    #define RXSYMBOLS 8   // Minimum count of symbols to reliably detect a LoRa preamble in rx mode. Should not be lower than 6.
-    if ( (LORA_PREAMBLE_LENGTH + 4.5) < (2 * RXSYMBOLS + 1 ) ) // 4.5 symbols are added to the user set preamble by the Sx1262
-    {  
-        #ifndef SILENT
-            MSG("Short Preamble, will not use RxDutyCycle!\n");
-        #endif
-        flag_No_Cycle = true;
-        return;
-    }
-    uint32_t preambTime = symbolTime * (LORA_PREAMBLE_LENGTH + 4.5); // micro secs. 
-    rxTime = 2 * RXSYMBOLS * symbolTime; 
-    sleepTime = preambTime - rxTime - 1000; // SX1262 needs 500 micro sec for each sleep/wake transition
-    if (preambTime < (2* rxTime + sleepTime) ) flag_No_Cycle = true;
+void MCU_deepsleep(void)
+{
     #ifndef SILENT
-    MSG("Will use RxDutyCycle: %s\n", (flag_No_Cycle) ? "YES" : "NO" );
-    MSG("RX time: %u micro s   sleep time: %u micro s\n", rxTime, sleepTime);
+    UART_1_Sleep;
     #endif
-    rxTime = (rxTime * 125) >> 3;  // * 15.768 micro s  (125/8 is 15.768) 
-    sleepTime = (sleepTime * 125) >> 3;
+    pinMode(P4_1, ANALOG); // SPI0 MISO
+    CySysPmDeepSleep(); // deep sleep mode    
+    systime = (uint32_t)TimerGetCurrentTime();
+    pinMode(P4_1, INPUT);
+    #ifndef SILENT
+    UART_1_Wakeup;
+    #endif
 }
