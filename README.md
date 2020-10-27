@@ -6,7 +6,7 @@ The actual node can be one of the LoRa CubeCell nodes by Heltec Automation: http
 
 Notes:
 
-Intended for use with the platform.io IDE. Depends on the NanoPB Lib. Serial output speed is 115200.
+Intended for use with the platform.io IDE. Depends on the NanoPB Lib and Base64 Lib (see platformio.ini). Serial output speed is 115200.
 See the provided platformio.ini for built-in environments. Default is cubecell_board.
 
 Will repeat packets ONCE. To prevent flooding the last repeated packet ID will not be repeated again.
@@ -24,15 +24,14 @@ Minimum size for none-Meshtastic packets is 14 bytes.
 
 "define NO_OLED" to turn off messages on the OLED. Supported Boards for OLED mode are HTCC-AB02 and HTCC-AB02S (cubecell_board_Plus and cubecell_gps). 
 
-Modify radio settings for your own channels:
+Modifying radio settings for your own channels:
 
 Edit the CONFIGURATION block in config.h
 
 e.g.
 #define REGION  RegionCode_EU865  -  defines your region (to EU865). For US, use RegionCode_US, for CN use RegionCode_CN etc. See config.h for more supported regions.
 
-MESHTASTIC_SPEED    3   - defines your speed to "very long range". Values are:  0 = short range, 1 = medium range, 2 = long range, 3 = very long range
+TX_MAX_POWER     14  -  sets output power to 14 dB. This value will also be used, wenn output power is set to Zero in your RegionCode (0 = max. power). TX_MAX_POWER will be ignored, when higher than RegionCode maximum
 
-MESHTASTIC_NAME[12] = {"Default"} - sets your Channel Name, but without "-Xy" suffix , e.g. use "Test" instead of "Test-A"
-
-TX_MAX_POWER     14  -  sets output power to 14 dB. This value will also be used, wenn output power is set to Zero in your RegionCode (0 = max. power). TX_MAX_POWER will be ignored, when higher than RegionCode maximum.
+char MeshtasticLink[] = "https://www.meshtastic.org/c/#GAMiENTxuzogKQdZ8Lz_q89Oab8qB0RlZmF1bHQ=" ;  (Example String for Channel "Default")
+Put your own Mesh Link into the "" . The Code will compute the channel settings based on that information.
