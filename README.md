@@ -36,4 +36,5 @@ e.g.
 TX_MAX_POWER     14  -  sets output power to 14 dB. This value will also be used, wenn output power is set to Zero in your RegionCode (0 = max. power). TX_MAX_POWER will be ignored, when higher than RegionCode maximum
 
 char MeshtasticLink[] = "https://www.meshtastic.org/c/#GAMiENTxuzogKQdZ8Lz_q89Oab8qB0RlZmF1bHQ=" ;  (Example String for Channel "Default")
+
 Put your own Mesh Link into the "" . The Code will compute the channel settings based on that information.
