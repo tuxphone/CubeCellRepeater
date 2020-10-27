@@ -4,7 +4,7 @@
 #include "cyPm.c"
 
 // CONFIGURATION: 
-// Change RegionCode, Frequency, Speed in config.h !
+// Change RegionCode config.h !
 #define VERBOSE         // define to SILENT to turn off serial messages
 #define NOBLINK        // define to NOBLINK to turn off LED signaling
 #define NO_OLED        // define to NO_OLED to turn off display
