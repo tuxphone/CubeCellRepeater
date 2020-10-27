@@ -18,6 +18,8 @@ You can use this for range tests.
 Will work with most packets meeting the radio settings, but the serial output is based on the assumption that the node receives meshtastic packets.
 Minimum size for none-Meshtastic packets is 14 bytes.
 
+The Repeater is not working for “medium range” setting due to the tight timings. It’s best for "very long range" and "long range", but is working for "short range", too.
+
 "#define SILENT" to stop serial output.
 
 "#define NOBLINK" to NOT getting a red blink from the RGB LED for the duration of sending a packet (can be quite long at speed setting 3).
