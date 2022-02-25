@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "config.h"
 #include <Base64.h>
+#include <LoRa_APP.h>
 #include "cyPm.c"
 
 // CONFIGURATION: 
