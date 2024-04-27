@@ -6,7 +6,7 @@ The actual node can be one of the LoRa CubeCell nodes by Heltec Automation: http
 
 Notes:
 
-Intended for use with the platform.io IDE. Depends on the NanoPB Lib and Base64 Lib (see platformio.ini). Serial output speed is 115200.
+Intended for use with the platform.io IDE. Serial output speed is 115200.
 See the provided platformio.ini for built-in environments. Default is cubecell_board.
 
 Will repeat packets ONCE with HopLimit reduced by one. To prevent flooding the last repeated packet ID will not be repeated again.
