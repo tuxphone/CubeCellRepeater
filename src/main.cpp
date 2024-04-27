@@ -26,14 +26,19 @@ void setup() {
 
 }
 
+void clearInterrupts(void) {
+  radio.clearDio1Action();
+  radio.finishTransmit();
+}
+
 void loop() {
   if (PacketReceived) {
     PacketReceived = false;
-    size_t length = radio.getPacketLength();
+    const size_t length = radio.getPacketLength();
     state = radio.readData(radiobuf, length);
     MSG("[RX]");
     if (state == RADIOLIB_ERR_NONE) {
-      int32_t payloadLen = length - sizeof(PacketHeader);
+      const int32_t payloadLen = length - sizeof(PacketHeader);
       if (payloadLen < 0) {
         MSG("\n[WARN]Not a Meshtastic packet, too short!\n");
         return; // will not repeat
@@ -51,15 +56,12 @@ void loop() {
       MSG(" re-send=%s\n", ( (lastPacketID != h->id) && (hop_limit!=0) )?"YES":"NO");
 
       if ( (lastPacketID != h->id) && (hop_limit!=0) ) {
-        h->flags -= 1;
-        //do not send into other transmits
-        radio.clearDio1Action();
-        radio.finishTransmit();
+        h->flags -= 1; // decrease HopLim by 1
+        clearInterrupts();
         while ( radio.scanChannel() == RADIOLIB_LORA_DETECTED ) delay(100);
         MSG("[TX] (id=0x%08X) HopLim=%i ... ", h->id, (h->flags & PACKET_FLAGS_HOP_MASK));
         lastPacketID = h->id;
-        radio.clearDio1Action();
-        radio.finishTransmit();  
+        clearInterrupts();
         radio.setPacketSentAction(ISR_setPacketSent);
         state=radio.startTransmit((uint8_t*)&radiobuf, length);
         if (state == RADIOLIB_ERR_NONE) {
@@ -67,28 +69,28 @@ void loop() {
         }
         else {
           MSG("failed, ERR = %i - resume RX", state);
-          radio.clearDio1Action();
-          radio.finishTransmit();
+          clearInterrupts();
           radio.setPacketReceivedAction(ISR_setReceived);
           radio.startReceive(); 
         }
       }
       
     } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
-      MSG("\n[ERROR]CRC error!\n");
+      MSG(" [ERROR]CRC error!\n");
     } else {
-      MSG("[ERROR]Receive failed, code: %i!\n", state);
+      MSG(" [ERROR]Receive failed, code: %i!\n", state);
     }
-
   }
 
   if (PacketSent) {
     PacketSent = false;
-    radio.clearDio1Action();
-    radio.finishTransmit();
+    clearInterrupts();
     radio.setPacketReceivedAction(ISR_setReceived);
     radio.startReceive(); 
   }
+  
+  delay(100); // wait for Serial
+  MCU_deepsleep();
 
 }
 
@@ -107,5 +109,4 @@ void MCU_deepsleep(void) {
 #endif
 #endif //CUBECELL
 
-//No rest for the wicked.
 }
