@@ -24,8 +24,11 @@
 
 uint8_t radiobuf[256];
 uint32_t lastPacketID = 0;
+int state = RADIOLIB_ERR_NONE;
 
 void MCU_deepsleep(void);   
+void clearInterrupts(void);
+void startReceive(void);
 
 // Flag and ISR for "Received packet" - events
 volatile bool PacketReceived = false;
@@ -40,8 +43,6 @@ volatile bool PacketSent = false;
 void ISR_setPacketSent(void) {
     PacketSent = true;  
 }
-
-int state = RADIOLIB_ERR_NONE;
 
 #ifndef SILENT
     #define MSG(...) Serial.printf(__VA_ARGS__)

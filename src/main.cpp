@@ -13,22 +13,14 @@ void setup() {
 #endif
   initRegion();       // create regions[] and load myRegion
   applyModemConfig(); // apply lora settings
-  radio.standby();
-  radio.setPacketReceivedAction(ISR_setReceived); // Interrupt Handler -> set "PacketReceived" flag at RX
   MSG("[INFO][SX1262] Starting to listen ... ");
-  state = radio.startReceive();
+  startReceive();
   if (state == RADIOLIB_ERR_NONE) {
     MSG("success!\n\n");
   } else {
     MSG("\n[ERROR][SX1262] startReceive() failed, code: %i\n\n ** Full Stop **", state);
     while (true);
   }
-
-}
-
-void clearInterrupts(void) {
-  radio.clearDio1Action();
-  radio.finishTransmit();
 }
 
 void loop() {
@@ -43,7 +35,7 @@ void loop() {
         MSG("\n[WARN]Not a Meshtastic packet, too short!\n");
         return; // will not repeat
       }
-      //const uint8_t *payload = radiobuf + sizeof(PacketHeader);
+
       PacketHeader *h = (PacketHeader *)radiobuf;
 
       const uint8_t hop_limit = h->flags & PACKET_FLAGS_HOP_MASK;
@@ -69,9 +61,7 @@ void loop() {
         }
         else {
           MSG("failed, ERR = %i - resume RX", state);
-          clearInterrupts();
-          radio.setPacketReceivedAction(ISR_setReceived);
-          radio.startReceive(); 
+          PacketSent=true;
         }
       }
       
@@ -84,14 +74,11 @@ void loop() {
 
   if (PacketSent) {
     PacketSent = false;
-    clearInterrupts();
-    radio.setPacketReceivedAction(ISR_setReceived);
-    radio.startReceive(); 
+    startReceive();
   }
   
   delay(100); // wait for Serial
   MCU_deepsleep();
-
 }
 
 void MCU_deepsleep(void) {
@@ -108,5 +95,15 @@ void MCU_deepsleep(void) {
     UART_1_Wakeup;
 #endif
 #endif //CUBECELL
+}
 
+void clearInterrupts(void) {
+  radio.clearDio1Action();
+  radio.finishTransmit();
+}
+
+void startReceive(){
+  clearInterrupts();
+  radio.setPacketReceivedAction(ISR_setReceived);
+  state=radio.startReceive(); 
 }
