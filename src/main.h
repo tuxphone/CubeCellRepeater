@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <RadioLib.h>
 
 // #define SILENT           // turn off serial output
 
@@ -16,19 +15,63 @@
 
 #define CC_MAX_POWER        22      // TX power setting. Maximum for CubeCell is 22, enforced by RadioLib.
 
+#define MAX_ID_LIST 32 // number of stored packet IDs to prevent unnecesary repeating
+#define MAX_TX_QUEUE 16 // max number of packets which can be waiting for transmission
+#define MAX_RHPACKETLEN 256
+
+#include <RadioLib.h>
 #ifdef CUBECELL
 #include "cyPm.c"  // for reliable sleep we use MCU_deepSleep()
     extern  uint32_t systime;   // CubeCell global system time count, Millis
     SX1262 radio = new Module(RADIOLIB_BUILTIN_MODULE);
 #endif //CUBECELL
 
-uint8_t radiobuf[256];
-uint32_t lastPacketID = 0;
+/// 16 bytes of random PSK for our _public_ default channel that all devices power up on (AES128)
+/// Meshtastic default key (AQ==):
+static const uint8_t mypsk[] = {0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
+                                0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01};
+// No Crypto = all zero
+
+#include <assert.h>
+#include <pb.h>
+#include <MeshTypes.h>
+#include <pb_decode.h>
+#include <pb_encode.h>
+#include <CryptoEngine.h>
+
+extern "C"
+{ 
+#include <mesh/compression/unishox2.h>
+}
+
+CryptoKey psk;
+meshtastic_MeshPacket mp;
+
+uint8_t radiobuf[MAX_RHPACKETLEN -1];
+
+typedef struct {
+    size_t   size;
+    uint8_t  buf[MAX_RHPACKETLEN -1];
+    uint32_t packetTime;
+} Packet_t;
+
+Packet_t txQueue[MAX_TX_QUEUE - 1];
+uint32_t idList[MAX_ID_LIST - 1];
+bool repeatPacket = false;
+bool txQueueHasPacket = false;
 int state = RADIOLIB_ERR_NONE;
 
 void MCU_deepsleep(void);   
 void clearInterrupts(void);
 void startReceive(void);
+bool update_idList(uint32_t id);
+void enqueueTX(uint8_t* buf, size_t size);
+uint8_t poptxQueue(void);
+void perhapsSend(uint8_t* buf, size_t size);
+
+void printVariants(const meshtastic_MeshPacket *p);
+void printPacket(const char *prefix, const meshtastic_MeshPacket *p);
+bool perhapsDecode(meshtastic_MeshPacket *p);
 
 // Flag and ISR for "Received packet" - events
 volatile bool PacketReceived = false;
@@ -56,72 +99,36 @@ void ISR_setPacketSent(void) {
 /**************
  * Meshtastic * 
  **************/
+
 #define PACKET_FLAGS_HOP_MASK 0x07
 #define PACKET_FLAGS_WANT_ACK_MASK 0x08
 #define PACKET_FLAGS_VIA_MQTT_MASK 0x10
 
-typedef enum _meshtastic_Config_LoRaConfig_RegionCode {
-    /* Region is not set */
-    meshtastic_Config_LoRaConfig_RegionCode_UNSET = 0,
-    /* United States */
-    meshtastic_Config_LoRaConfig_RegionCode_US = 1,
-    /* European Union 433mhz */
-    meshtastic_Config_LoRaConfig_RegionCode_EU_433 = 2,
-    /* European Union 868mhz */
-    meshtastic_Config_LoRaConfig_RegionCode_EU_868 = 3,
-    /* China */
-    meshtastic_Config_LoRaConfig_RegionCode_CN = 4,
-    /* Japan */
-    meshtastic_Config_LoRaConfig_RegionCode_JP = 5,
-    /* Australia / New Zealand */
-    meshtastic_Config_LoRaConfig_RegionCode_ANZ = 6,
-    /* Korea */
-    meshtastic_Config_LoRaConfig_RegionCode_KR = 7,
-    /* Taiwan */
-    meshtastic_Config_LoRaConfig_RegionCode_TW = 8,
-    /* Russia */
-    meshtastic_Config_LoRaConfig_RegionCode_RU = 9,
-    /* India */
-    meshtastic_Config_LoRaConfig_RegionCode_IN = 10,
-    /* New Zealand 865mhz */
-    meshtastic_Config_LoRaConfig_RegionCode_NZ_865 = 11,
-    /* Thailand */
-    meshtastic_Config_LoRaConfig_RegionCode_TH = 12,
-    /* WLAN Band */
-    meshtastic_Config_LoRaConfig_RegionCode_LORA_24 = 13,
-    /* Ukraine 433mhz */
-    meshtastic_Config_LoRaConfig_RegionCode_UA_433 = 14,
-    /* Ukraine 868mhz */
-    meshtastic_Config_LoRaConfig_RegionCode_UA_868 = 15,
-    /* Malaysia 433mhz */
-    meshtastic_Config_LoRaConfig_RegionCode_MY_433 = 16,
-    /* Malaysia 919mhz */
-    meshtastic_Config_LoRaConfig_RegionCode_MY_919 = 17,
-    /* Singapore 923mhz */
-    meshtastic_Config_LoRaConfig_RegionCode_SG_923 = 18
-} meshtastic_Config_LoRaConfig_RegionCode;
+/// helper function for encoding a record as a protobuf, any failures to encode are fatal and we will panic
+/// returns the encoded packet size
+size_t pb_encode_to_bytes(uint8_t *destbuf, size_t destbufsize, const pb_msgdesc_t *fields, const void *src_struct)
+{
+    pb_ostream_t stream = pb_ostream_from_buffer(destbuf, destbufsize);
+    if (!pb_encode(&stream, fields, src_struct)) {
+        MSG("[ERROR]Panic: can't encode protobuf reason='%s'\n", PB_GET_ERROR(&stream));
+        assert(
+            0); // If this assert fails it probably means you made a field too large for the max limits specified in mesh.options
+    } else {
+        return stream.bytes_written;
+    }
+}
 
-/* Standard predefined channel settings
- Note: these mappings must match ModemPreset Choice in the device code. */
-typedef enum _meshtastic_Config_LoRaConfig_ModemPreset {
-    /* Long Range - Fast */
-    meshtastic_Config_LoRaConfig_ModemPreset_LONG_FAST = 0,
-    /* Long Range - Slow */
-    meshtastic_Config_LoRaConfig_ModemPreset_LONG_SLOW = 1,
-    /* Very Long Range - Slow */
-    meshtastic_Config_LoRaConfig_ModemPreset_VERY_LONG_SLOW = 2,
-    /* Medium Range - Slow */
-    meshtastic_Config_LoRaConfig_ModemPreset_MEDIUM_SLOW = 3,
-    /* Medium Range - Fast */
-    meshtastic_Config_LoRaConfig_ModemPreset_MEDIUM_FAST = 4,
-    /* Short Range - Slow */
-    meshtastic_Config_LoRaConfig_ModemPreset_SHORT_SLOW = 5,
-    /* Short Range - Fast */
-    meshtastic_Config_LoRaConfig_ModemPreset_SHORT_FAST = 6,
-    /* Long Range - Moderately Fast */
-    meshtastic_Config_LoRaConfig_ModemPreset_LONG_MODERATE = 7
-} meshtastic_Config_LoRaConfig_ModemPreset;
-
+/// helper function for decoding a record as a protobuf, we will return false if the decoding failed
+bool pb_decode_from_bytes(const uint8_t *srcbuf, size_t srcbufsize, const pb_msgdesc_t *fields, void *dest_struct)
+{
+    pb_istream_t stream = pb_istream_from_buffer(srcbuf, srcbufsize);
+    if (!pb_decode(&stream, fields, dest_struct)) {
+        MSG("[ERROR]Can't decode protobuf reason='%s', pb_msgdesc %p\n", PB_GET_ERROR(&stream), fields);
+        return false;
+    } else {
+        return true;
+    }
+}
 
 #define RDEF(name, freq_start, freq_end, duty_cycle, spacing, power_limit, audio_permitted, frequency_switching, wide_lora)      \
     {                                                                                                                            \
@@ -282,6 +289,43 @@ uint32_t hash(const char *str)
         hash = ((hash << 5) + hash) + (unsigned char)c; 
 
     return hash;
+}
+
+/** A channel number (index into the channel table)
+ */
+typedef uint8_t ChannelIndex;
+
+/** A low quality hash of the channel PSK and the channel name.  created by generateHash(chIndex)
+ * Used as a hint to limit which PSKs are considered for packet decoding.
+ */
+typedef uint8_t ChannelHash;
+
+uint8_t xorHash(const uint8_t *p, size_t len)
+{
+    uint8_t code = 0;
+    for (size_t i = 0; i < len; i++)
+        code ^= p[i];
+    return code;
+}
+
+/** Given a channel number, return the (0 to 255) hash for that channel.
+ * The hash is just an xor of the channel name followed by the channel PSK being used for encryption
+ * If no suitable channel could be found, return -1
+ */
+
+int16_t generateHash(ChannelIndex channelNum)
+{
+    auto k = psk; //getKey(channelNum);
+    if (k.length < 0)
+        return -1; // invalid
+    else {
+        const char *name = CC_CHANNEL_NAME; //getName(channelNum);
+        uint8_t h = xorHash((const uint8_t *)name, strlen(name));
+
+        h ^= xorHash(k.bytes, k.length);
+
+        return h;
+    }
 }
 
 void applyModemConfig()
