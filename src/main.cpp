@@ -1,48 +1,43 @@
 #include <main.h>
-#include <assert.h>
-
-typedef struct {
-    uint32_t to, from, id;
-    // The bottom three bits of flags are used to store hop_limit
-    uint8_t flags;
-    uint8_t channel;
-} PacketHeader;
 
 void setup() {
-  UART_1_RxWakeDisableInt(); // no wake on UART activity
-  memset(idList, 0, MAX_ID_LIST *4);
-  for (uint8_t i = 0; i<(MAX_TX_QUEUE - 1); i++) {
-    txQueue[i].size = 0;
-  }
+  msgID.clear();
+  txQueue.clear();
   #ifndef SILENT
   Serial.begin(115200);
   #endif
 
-  MSG("[INFO][CryptoEngine] Initializing ... ");
+  MSG("[INF][CryptoEngine]Initializing ... ");
   memcpy(psk.bytes, mypsk, sizeof(mypsk));
   psk.length = sizeof(psk.bytes);
   crypto->setKey(psk);
 
   initRegion();       // create regions[] and load myRegion
   applyModemConfig(); // apply lora settings
-  MSG("[INFO][SX1262] Starting to listen ... ");
+  radio.setDio1Action(ISR_dio1Action);
+  MSG("[INF][SX1262]Starting to listen ...\n");
   startReceive();
-  if (state == RADIOLIB_ERR_NONE) {
-    MSG("success!\n\n");
-  } else {
-    MSG("\n[ERROR][SX1262] startReceive() failed, code: %i\n\n ** Full Stop **", state);
-    while (true);
-  }
 }
 
 void loop() {
+
+  if (dio1) {
+    dio1 = false;
+    static uint16_t irqStatus = radio.getIrqStatus();
+    if (irqStatus & RADIOLIB_SX126X_IRQ_RX_DONE) {
+      PacketReceived = true;
+    }
+    if (irqStatus & RADIOLIB_SX126X_IRQ_TX_DONE) {
+      PacketSent = true;
+    }
+  }
+
   if (PacketReceived) {
     PacketReceived = false;
     const size_t length = radio.getPacketLength();
     state = radio.readData(radiobuf, length);
     PacketHeader* h = (PacketHeader *)radiobuf;
 
-    //MSG("[RX]");
     if (state == RADIOLIB_ERR_NONE) {
       const int32_t payloadLen = length - sizeof(PacketHeader);
       if (payloadLen < 0) {
@@ -50,47 +45,17 @@ void loop() {
         return; // will not repeat
       }
       const uint8_t hop_limit = h->flags & PACKET_FLAGS_HOP_MASK;
-      /*
-      MSG(" (id=0x%08X) HopLim=%i from=0x%08X to=0x%08X WantAck=%s viaMQTT=%s", h->id, 
-         hop_limit, h->from, h->to, (h->flags & PACKET_FLAGS_WANT_ACK_MASK)? "YES":"NO", (h->flags & PACKET_FLAGS_VIA_MQTT_MASK)? "YES":"NO");
-      
-      MSGFLOAT(" SNR=",radio.getSNR() );
-      MSGFLOAT(" RSSI=", radio.getRSSI() );
-      */
-      repeatPacket =  update_idList(h->id); 
-      if ( hop_limit == 0) repeatPacket = false; // do not repeat if id is known or hop limit is Zero
-#ifndef SILENT // print packet:
-      const uint8_t *payload = radiobuf + sizeof(PacketHeader);
-      mp.from = h->from;
-      mp.to = h->to;
-      mp.id = h->id;
-      mp.channel = h->channel;
-      mp.hop_limit = h->flags   & PACKET_FLAGS_HOP_MASK;
-      mp.want_ack = h->flags & PACKET_FLAGS_WANT_ACK_MASK;
-      mp.via_mqtt = h->flags & PACKET_FLAGS_VIA_MQTT_MASK;
-      mp.rx_snr = radio.getSNR();
-      mp.rx_rssi = lround(radio.getRSSI());
-      mp.which_payload_variant = meshtastic_MeshPacket_encrypted_tag; // Mark that the payload is still encrypted at this point
-      assert(((uint32_t)payloadLen) <= sizeof(mp.encrypted.bytes));
-      memcpy(mp.encrypted.bytes, payload, payloadLen);
-      mp.encrypted.size = payloadLen;
-      MSG("\n[NEW]");
+      // do not repeat if id is known or hop limit is zero
+      repeatPacket =  msgID.add(h->id); 
+      if (hop_limit == 0) repeatPacket = false;
+      MSG("\n[NEW](id=0x%08X) (HopLim %d) ", h->id, hop_limit);
       if ( !repeatPacket ){
-        MSG("(id=0x%08X) no repeat! (HopLim %d)\n", mp.id, mp.hop_limit);
-      } else {
-        perhapsDecode(&mp); // try to decode and print the result
+        MSG("no repeat!\n");
+      } 
+      else {
+        h->flags -= 1; // decrease hop limit by 1
+        txQueue.add(radiobuf, length);
       }
-#endif //SILENT     
-      
-/*    MSG(" repeat=%s\n", (repeatPacket)?"YES":"NO");
-      MSGFLOAT(" Freq Error=", radio.getFrequencyError());
-      MSG("\n");
-*/
-      if ( repeatPacket ) {
-        h->flags -= 1; // decrease HopLim by 1
-        enqueueTX(radiobuf, length);
-      }
-      
     } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
       MSG(" [ERROR]CRC error!\n");
     } else {
@@ -98,39 +63,60 @@ void loop() {
     }
   }
 
-  if (txQueueHasPacket) { // try to repeat packets
-    //const long wait = lround( abs( radio.getSNR() * radio.getRSSI() ));
-    long wait = 1000;
-    radio.startChannelScan(3, 24, 10);
-    for (int i = 1; i < wait; i++) {
-      if (radio.getChannelScanResult() == RADIOLIB_LORA_DETECTED) {
-        clearInterrupts();
-        radio.setPacketReceivedAction(ISR_setReceived);
-        radio.startReceive(20000); 
-        return; // new packet arrived while waiting!
+  while (txQueue.hasPackets) {
+    p = txQueue.pop();
+    // if we pop a Nullpointer (empty queue), hasPackets will be false now 
+    if (txQueue.hasPackets) {
+      TimerTime_t now = systime; //RtcGetTimerValue();
+      //try to decode the packet and print it
+      uint32_t wait = maxPacketTimeMsec + abs( radio.getRSSI() * radio.getSNR() ) + random(0, 3*slotTimeMsec);
+      MSG("[INF]wait %i ms before TX\n", wait);
+      while ( (now + wait) > systime ) {
+        // while waiting, we still are in receive mode
+        if (dio1) {
+          MSG("[INF]New packet, no TX\n");
+          return; // new packet arrived, return to handle it
+        }
+        delay(5);
       }
-      delay(2);
+      // last check before actually sending the packet
+      radio.startChannelScan(); // RadioLib 6.5 overrides all user params
+      // CAD will activate dio1 at activity or timeout
+      MCU_deepsleep();
+      if (radio.getChannelScanResult() == RADIOLIB_LORA_DETECTED) {
+        dio1 = false;
+        startReceive();
+        MSG("[INF]Lora activity, no TX\n");
+        return;
+      }
+      dio1 = false;
+      if (perhapsSend(&p->buf[0], p->size) ) {
+        perhapsDecode(&p->buf[0], p->size); 
+        PacketSent = true;
+        // mark packet as "deleted"
+        p->size = 0;
+      } else {
+        // Could not send, resume receiving
+        PacketSent = true;
+      }
     }
-
-    uint8_t idx = poptxQueue();
-    if (txQueue[idx].size == 0){
-      txQueueHasPacket = false; // empty Queue, do nothing
-      //MSG("[INFO] TX Queue is empty\n");
-    }
-    else {
-      perhapsSend(&txQueue[idx].buf[0], txQueue[idx].size);
-      txQueue[idx].size = 0;
-    }    
-  }
-
-  if (PacketSent) {
-    PacketSent = false;
-    startReceive();
-  }
   
-  delay(100); // wait for Serial
+    if (PacketSent) {
+      PacketSent = false;
+      radio.finishTransmit();
+      dio1 = false;
+      startReceive();
+    }
+  }
+
+  #ifndef SILENT
+  // wait for serial output to conplete
+  delay(10);
+  #endif
+
   MCU_deepsleep();
 }
+
 
 void MCU_deepsleep(void) {
 #ifdef CUBECELL  
@@ -138,7 +124,7 @@ void MCU_deepsleep(void) {
     UART_1_Sleep;  // aka USB, if you use UART2 for communication, add UART_2_Sleep / Wakeup
 #endif
     pinMode(P4_1, ANALOG); // SPI0 MISO, save power
-    CySysPmDeepSleep(); // deep sleep mode
+    CySysPmDeepSleep();
     // after sleep, set global time counter, set MISO to input, reactivate UART :    
     systime = (uint32_t)RtcGetTimerValue();
     pinMode(P4_1, INPUT);
@@ -148,240 +134,144 @@ void MCU_deepsleep(void) {
 #endif //CUBECELL
 }
 
-void clearInterrupts(void) {
-  radio.clearDio1Action();
-  radio.finishTransmit();
-}
-
 void startReceive(){
-  clearInterrupts();
-  radio.setPacketReceivedAction(ISR_setReceived);
-  state=radio.startReceive(); 
+  MSG("[RX]Start receiving ...\n");
+  while (RADIOLIB_ERR_NONE != radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF, RADIOLIB_SX126X_IRQ_RX_DEFAULT , RADIOLIB_SX126X_IRQ_RX_DONE, 0) )
+  {
+   MSG("\n[ERROR][SX1262] startReceive() failed, code: %i\n", state);
+   delay(1000); 
+  }
 }
 
-bool update_idList(uint32_t id){
-  for (uint8_t i=0; i < (MAX_ID_LIST - 1); i++) {
-     //MSG("\nstored: 0x%08X  delivered: 0x%08X",idQueue[i-1], id);
-    if (idList[i] == id){
-     return false; // packet ID is known, no Queue update
-    }
-  }
-
-  // store new ID:
-  uint8_t idx = MAX_ID_LIST;
-  for (uint8_t i=0; i < (MAX_ID_LIST -1); i++){
-    if (idList[i] == 0) {
-      idx = i;
-      break;
-    } 
-  }
-  if (idx == MAX_ID_LIST) {
-    idList[0] = id;
-    idList[1] = 0;
-  }
-  else {
-    idList[idx] = id;
-    if (++idx < MAX_ID_LIST) { idList[idx] = 0; }
-    else { idList[0] = 0; }
-  }
-  return true; // packet ID was not known, Queue was updated
-}
-
-void enqueueTX(uint8_t* buf, size_t size){
+bool perhapsSend(uint8_t* buf, size_t size) {
   PacketHeader* h = (PacketHeader *)buf;
-  uint8_t idx = MAX_TX_QUEUE;
-  for (uint8_t i=0; i<(MAX_TX_QUEUE -1); i++) {
-    if (txQueue[i].size == 0) {  // search for a free slot
-      idx = i;
-      break;
-    }
-  }
-  if (idx == MAX_TX_QUEUE) {  // no free slot, overwrite oldest packet
-    idx = 0;
-    for (uint8_t i=1; i<(MAX_TX_QUEUE -1); i++) {
-      if (txQueue[idx].packetTime < txQueue[i].packetTime) idx = i;
-    }
-  }
-  txQueue[idx].size = size;
-  MSG("[INF](id=0x%08X) enQueue Index=%i size=%i", h->id, idx, size);
-  txQueue[idx].packetTime = (uint32_t)RtcGetTimerValue();
-  MSG(" Time=%i\n",txQueue[idx].packetTime); //MSG("\n");
-  memcpy(&txQueue[idx].buf[0], buf, size);
-  //MSG(" Copy done!\n");
-  txQueueHasPacket = true;
-}
-
-uint8_t poptxQueue(void) {
-  uint8_t idx = MAX_TX_QUEUE;
-  for (uint8_t i=0 ;i < (MAX_TX_QUEUE -1); i++ ){
-    if (txQueue[i].size != 0) {
-      idx = i;
-      break;
-    }
-  }
-  if (idx == MAX_TX_QUEUE) { // empty Queue
-    return 0; 
-  }
-  for (uint8_t i=idx; i<(MAX_TX_QUEUE -1); i++) {
-    if ( (txQueue[i].size != 0) && (txQueue[idx].packetTime < txQueue[i].packetTime) ) idx = i; // find oldest packet
-  }
-  //MSG("[INFO]POP index=%i\n", idx);
-  return idx;
-}
-
-void perhapsSend(uint8_t* buf, size_t size) {
-  PacketHeader* h = (PacketHeader *)buf;
-  //clearInterrupts();
-  //while ( radio.scanChannel() == RADIOLIB_LORA_DETECTED ) delay( (uint32_t)lround( abs(radio.getSNR() + radio.getRSSI() ) ) );
-  MSG("[TX] (id=0x%08X) HopLim=%i ... ", h->id, (h->flags & PACKET_FLAGS_HOP_MASK));
-  clearInterrupts();
-  radio.setPacketSentAction(ISR_setPacketSent);
+  MSG("\n[TX](id=0x%08X) HopLim=%i  ", h->id, (h->flags & PACKET_FLAGS_HOP_MASK));
   state=radio.startTransmit(buf, size);
   if (state == RADIOLIB_ERR_NONE) {
-    MSG("OK\n");
+    MSG("starting ... ");
   }
   else {
-    MSG("failed, ERR = %i - resume RX", state);
-    PacketSent=true; // do not halt on error
-  }
-  
-}
-
-static uint8_t bytes[MAX_RHPACKETLEN];
-
-bool perhapsDecode(meshtastic_MeshPacket *p)
-{
-/*  concurrency::LockGuard g(cryptLock);
-
-    if (config.device.role == meshtastic_Config_DeviceConfig_Role_REPEATER &&
-        config.device.rebroadcast_mode == meshtastic_Config_DeviceConfig_RebroadcastMode_ALL_SKIP_DECODING)
-        return false;
-
-    if (config.device.rebroadcast_mode == meshtastic_Config_DeviceConfig_RebroadcastMode_KNOWN_ONLY &&
-        !nodeDB.getMeshNode(p->from)->has_user) {
-        LOG_DEBUG("Node 0x%x not in NodeDB. Rebroadcast mode KNOWN_ONLY will ignore packet\n", p->from);
-        return false;
-    }
-*/
-    if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag)
-        return true; // If packet was already decoded just return
-
-    // assert(p->which_payloadVariant == MeshPacket_encrypted_tag);
-
-    // Try to find a channel that works with this hash
-/*    for (ChannelIndex chIndex = 0; chIndex < channels.getNumChannels(); chIndex++) {
-        // Try to use this hash/channel pair
-        if (channels.decryptForHash(chIndex, p->channel)) { */
-            // Try to decrypt the packet if we can
-            size_t rawSize = p->encrypted.size;
-            assert(rawSize <= sizeof(bytes));
-            memcpy(bytes, p->encrypted.bytes,
-                   rawSize); // we have to copy into a scratch buffer, because these bytes are a union with the decoded protobuf
-            crypto->decrypt(p->from, p->id, rawSize, bytes);
-
-            // printBytes("plaintext", bytes, p->encrypted.size);
-
-            // Take those raw bytes and convert them back into a well structured protobuf we can understand
-            memset(&p->decoded, 0, sizeof(p->decoded));
-            if (!pb_decode_from_bytes(bytes, rawSize, &meshtastic_Data_msg, &p->decoded)) {
-                MSG("[ERROR]Invalid protobufs in received mesh packet (bad psk?)!\n");
-            } else if (p->decoded.portnum == meshtastic_PortNum_UNKNOWN_APP) {
-                MSG("[ERROR]Invalid portnum (bad psk?)!\n");
-            } else {
-                // parsing was successful
-                p->which_payload_variant = meshtastic_MeshPacket_decoded_tag; // change type to decoded
-                p->channel = generateHash(0);                                         // change to store the index instead of the hash
-
-                // Decompress if needed. jm
-                if (p->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_COMPRESSED_APP) {
-                    // Decompress the payload
-                    char compressed_in[meshtastic_Constants_DATA_PAYLOAD_LEN] = {};
-                    char decompressed_out[meshtastic_Constants_DATA_PAYLOAD_LEN] = {};
-                    int decompressed_len;
-
-                    memcpy(compressed_in, p->decoded.payload.bytes, p->decoded.payload.size);
-
-                    decompressed_len = unishox2_decompress_simple(compressed_in, p->decoded.payload.size, decompressed_out);
-
-                    // LOG_DEBUG("\n\n**\n\nDecompressed length - %d \n", decompressed_len);
-
-                    memcpy(p->decoded.payload.bytes, decompressed_out, decompressed_len);
-
-                    // Switch the port from PortNum_TEXT_MESSAGE_COMPRESSED_APP to PortNum_TEXT_MESSAGE_APP
-                    p->decoded.portnum = meshtastic_PortNum_TEXT_MESSAGE_APP;
-                }
-
-                printPacket("", p);
-                return true;
-            }
-        //}
-    //}
-
-    MSG("[ERROR]No suitable channel found for decoding, hash was 0x%x!\n", p->channel);
+    MSG("failed, ERR = %i - resume RX\n", state);
     return false;
+  }
+  delay(10);
+  MCU_deepsleep(); // wait for TX to complete, will wake on any DIO1
+  state = radio.getIrqStatus();
+  (state & RADIOLIB_SX126X_IRQ_TX_DONE) ? MSG("done!\n") : MSG("failed. Returned IRQ=%i\n", state);
+  dio1 = false;
+  return ( state & RADIOLIB_SX126X_IRQ_TX_DONE );  
 }
 
-void printPacket(const char *prefix, const meshtastic_MeshPacket *p) {
-
-  MSG("%s(id=0x%08X fr=0x%.2X to=0x%.2X, WantAck=%s, HopLim=%d Ch=0x%X", prefix, p->id,
-                                            p->from, p->to, (p->want_ack)? "YES":"NO", p->hop_limit, p->channel);
-  if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
-        auto &s = p->decoded;
-        MSG(" Portnum=%d", s.portnum);
-        if (s.want_response)
-            MSG(" WANTRESP");
-        if (s.source != 0)
-            MSG(" source=%08x", s.source);
-        if (s.dest != 0)
-            MSG(" dest=%08x", s.dest);
-        if (s.request_id)
-            MSG(" requestId=%0x", s.request_id);
-        if (p->rx_time != 0)
-        MSG(" rxtime=%u", p->rx_time);
-        if (p->rx_snr != 0.0)
-            MSGFLOAT(" rxSNR=", p->rx_snr);
-        if (p->rx_rssi != 0)
-            MSG(" rxRSSI=%i", p->rx_rssi);
-        if (p->via_mqtt != 0)
-            MSG(" via MQTT");
-        if (p->priority != 0)
-            MSG(" priority=%d", p->priority);
-
-        MSG("\nPayload: "); printVariants(p); 
-    } else {
-        MSG(" encrypted!\n");
+bool perhapsDecode(uint8_t* buf, size_t size) {
+// modified code, (c) Meshtastic https://github.com/meshtastic/firmware
+  PacketHeader* h = (PacketHeader *)buf;
+  const int32_t len = size - sizeof(PacketHeader);
+  const uint8_t *payload = radiobuf + sizeof(PacketHeader);
+  mp.from = h->from;
+  mp.to = h->to;
+  mp.id = h->id;
+  mp.channel = h->channel;
+  mp.hop_limit = h->flags & PACKET_FLAGS_HOP_MASK;
+  mp.hop_limit += 1;
+  mp.want_ack  = h->flags & PACKET_FLAGS_WANT_ACK_MASK;
+  mp.via_mqtt  = h->flags & PACKET_FLAGS_VIA_MQTT_MASK;
+  mp.rx_snr  = radio.getSNR();
+  mp.rx_rssi = lround(radio.getRSSI());
+  mp.which_payload_variant = meshtastic_MeshPacket_encrypted_tag;
+  mp.encrypted.size = 0;
+  static uint8_t scratchbuf[MAX_RHPACKETLEN];
+  assert(len <= sizeof(scratchbuf));
+  // we have to copy into a scratch buffer, because mp.encrypted is a union with the decoded protobuf
+  memcpy(scratchbuf, buf + sizeof(PacketHeader), len); 
+  crypto->decrypt(mp.from, mp.id, len, scratchbuf);
+  memset(&mp.decoded, 0, sizeof(mp.decoded));
+  if (!pb_decode_from_bytes((const uint8_t*)scratchbuf, len, &meshtastic_Data_msg, &mp.decoded)) {
+    MSG("[ERROR]Invalid protobufs in received mesh packet (bad psk?)!\n");
+  } else if (mp.decoded.portnum == meshtastic_PortNum_UNKNOWN_APP) {
+    MSG("[ERROR]Invalid portnum (bad psk?)!\n");
+  } else {
+    mp.which_payload_variant = meshtastic_MeshPacket_decoded_tag;
+    mp.channel = generateHash(0);
+    /*
+    if (mp.decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_COMPRESSED_APP) {
+      char compressed_in[meshtastic_Constants_DATA_PAYLOAD_LEN] = {};
+      char decompressed_out[meshtastic_Constants_DATA_PAYLOAD_LEN] = {};
+      int decompressed_len;
+      memcpy(compressed_in, mp.decoded.payload.bytes, mp.decoded.payload.size);
+      decompressed_len = unishox2_decompress_simple(compressed_in, mp.decoded.payload.size, decompressed_out);
+      memcpy(mp.decoded.payload.bytes, decompressed_out, decompressed_len);
+      mp.decoded.portnum = meshtastic_PortNum_TEXT_MESSAGE_APP;
     }
-    //MSG("\n");    
+    */
+    printPacket();
+    return true;
+  }
+  MSG("[ERROR]No suitable channel found for decoding, hash was 0x%x!\n", mp.channel);
+  return false;
 }
 
-void printVariants(const meshtastic_MeshPacket *p){
+void printPacket(void) {
+  MSG("[INF](id=0x%08X) from=0x%.2X to=0x%.2X, WantAck=%s, HopLim=%d Ch=0x%X", 
+        mp.id, mp.from, mp.to, (mp.want_ack)? "YES":"NO", mp.hop_limit, mp.channel);
+  if (mp.which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
+    auto &s = mp.decoded;
+    MSG(" Portnum=%d", s.portnum);
+    if (s.want_response)  MSG(" WANTRESP");
+    if (s.source != 0)    MSG(" source=%08x", s.source);
+    if (s.dest != 0)      MSG(" dest=%08x", s.dest);
+    if (s.request_id)     MSG(" requestId=%0x", s.request_id);
+    if (mp.rx_time != 0)  MSG(" rxtime=%u", mp.rx_time);
+    if (mp.rx_snr != 0.0) MSGFLOAT(" rxSNR=", mp.rx_snr);
+    if (mp.rx_rssi != 0)  MSG(" rxRSSI=%i", mp.rx_rssi);
+    if (mp.via_mqtt != 0) MSG(" via MQTT");
+    if (mp.priority != 0) MSG(" priority=%d", mp.priority);
+    MSG("\nPayload: "); 
+    printVariants(); 
+  } else {
+    MSG(" encrypted!\n");
+  }  
+}
 
+void printVariants(void){
   // Make sure we have a decoded packet
-  if (p->which_payload_variant !=  meshtastic_MeshPacket_decoded_tag) 
+  if (mp.which_payload_variant !=  meshtastic_MeshPacket_decoded_tag) 
     return;
-
-  auto &mp = p->decoded;
+  auto &d = mp.decoded;
 
   // TEXT MESSAGE
   // /modules/TextMessageModule.cpp
-  if (mp.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP){
-    MSG("\"%.*s\"\n", mp.payload.size, mp.payload.bytes);
+  if (d.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP){
+    MSG("TEXT ");
+    MSG("\"%.*s\"\n", d.payload.size, d.payload.bytes);
+    return;
+  }
+
+  // HARDWARE MESSAGE
+  // /modules/RemoteHardwareModule.cpp
+  if (d.portnum == meshtastic_PortNum_REMOTE_HARDWARE_APP){
+    MSG("GPIO ");
+    meshtastic_NodeRemoteHardwarePin pin;
+    if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_NodeRemoteHardwarePin_msg, &pin)) {
+      MSG("*** Error ***\n");
+      return;
+    }
+    
     return;
   }
 
   // POSITION MESSAGE
   // /modules/PositionModule.cpp
-  if (mp.portnum == meshtastic_PortNum_POSITION_APP){
-    MSG("Position ");
+  if (d.portnum == meshtastic_PortNum_POSITION_APP){
+    MSG("POSITION ");
     meshtastic_Position pos;
-    if (!pb_decode_from_bytes(mp.payload.bytes, mp.payload.size, &meshtastic_Position_msg, &pos)) {
+    if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_Position_msg, &pos)) {
       MSG("*** Error ***\n");
       return;
     }
     // Log packet size and data fields
-    MSG("node=%08x l=%d latI=%d lonI=%d msl=%d hae=%d geo=%d pdop=%d hdop=%d vdop=%d siv=%d fxq=%d fxt=%d pts=%d "
+    MSG("Node=%08X l=%d latI=%d lonI=%d msl=%d hae=%d geo=%d pdop=%d hdop=%d vdop=%d siv=%d fxq=%d fxt=%d pts=%d "
              "time=%d\n",
-             p->from, mp.payload.size, pos.latitude_i, pos.longitude_i, pos.altitude, pos.altitude_hae,
+             mp.from, d.payload.size, pos.latitude_i, pos.longitude_i, pos.altitude, pos.altitude_hae,
              pos.altitude_geoidal_separation, pos.PDOP, pos.HDOP, pos.VDOP, pos.sats_in_view, pos.fix_quality, pos.fix_type, pos.timestamp,
              pos.time);
     return;
@@ -389,10 +279,10 @@ void printVariants(const meshtastic_MeshPacket *p){
   
   // NODEINFO MESSAGE
   // /modules/NodeInfoModule.cpp
-  if (mp.portnum == meshtastic_PortNum_NODEINFO_APP){
-    MSG("Node Info: ");
+  if (d.portnum == meshtastic_PortNum_NODEINFO_APP){
+    MSG("NODE INFO ");
     meshtastic_User user;
-    if (!pb_decode_from_bytes(mp.payload.bytes, mp.payload.size, &meshtastic_User_msg, &user)) {
+    if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_User_msg, &user)) {
       MSG("*** Error ***\n");
       return;
     }
@@ -404,15 +294,38 @@ void printVariants(const meshtastic_MeshPacket *p){
     MSG(" HW model: %i role: %i\n", (uint8_t)user.hw_model, (uint8_t)user.role);
     return;
   }
-    
-  
 
-  // TELEMETRY
-  if (mp.portnum == meshtastic_PortNum_TELEMETRY_APP){
-    MSG("Telemetry ");
+  // ROUTING MESSAGE
+  // /modules/RoutingModule.cpp
+   if (d.portnum == meshtastic_PortNum_ROUTING_APP){
+    MSG("ROUTING \n");
+    /*
+    meshtastic_Routing r;
+    if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_Routing_msg, &r)) {
+      MSG("*** Error ***\n");
+      return;
+    }
+    if (r.which_variant == sizeof(meshtastic_Routing_Error) ) {
+      MSG("RoutingError=%i\n", r.error_reason);
+    } else {
+      MSG("RouteRequest ["); 
+      for (uint8_t i=0; i < r.route_request.route_count; i++) MSG("0x%X ", r.route_request.route[i]);
+      MSG("] ");
+      MSG("RouteReply ["); 
+      for (uint8_t i=0; i < r.route_reply.route_count; i++) MSG("0x%X ", r.route_reply.route[i]);
+      MSG("]\n");
+
+    }
+    */
+    return;
+  }
+
+  // TELEMETRY MESSAGE
+  if (d.portnum == meshtastic_PortNum_TELEMETRY_APP){
+    MSG("TELEMETRY");
     meshtastic_Telemetry telemetry;
     meshtastic_Telemetry *t = &telemetry;
-    if (!pb_decode_from_bytes(mp.payload.bytes, mp.payload.size, &meshtastic_Telemetry_msg, &telemetry)) {
+    if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_Telemetry_msg, &telemetry)) {
       MSG("*** Error ***\n");
       return;
     }
@@ -444,9 +357,9 @@ void printVariants(const meshtastic_MeshPacket *p){
         MSGFLOAT("barometric_pressure=", t->variant.environment_metrics.barometric_pressure);
         MSGFLOAT(", current=",   t->variant.environment_metrics.current);
         MSGFLOAT(", gas_resistance=",t->variant.environment_metrics.gas_resistance);
-        MSGFLOAT(", relative_humidity=",t->variant.environment_metrics.relative_humidity);
-        MSGFLOAT(", temperature=", t->variant.environment_metrics.temperature);
-        MSGFLOAT(", voltage=", t->variant.environment_metrics.voltage);
+        MSGFLOAT(", rel_humidity=",t->variant.environment_metrics.relative_humidity);
+        MSGFLOAT(", temp=", t->variant.environment_metrics.temperature);
+        MSGFLOAT(", volt=", t->variant.environment_metrics.voltage);
         MSG("\n");
         return;
     }
@@ -463,11 +376,123 @@ void printVariants(const meshtastic_MeshPacket *p){
     }
   }
 
+  // TRACEROUTE MESSAGE
+  // /modules/TraceRouteModule.cpp
+  if (d.portnum == meshtastic_PortNum_TRACEROUTE_APP){
+    MSG("TRACEROUTE");
+    meshtastic_RouteDiscovery route;
+    if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_RouteDiscovery_msg, &route)) {
+      MSG("*** Error ***\n");
+      return;
+    }
+    MSG("(seen by %i Nodes", route.route_count);
+    if (route.route_count > 0) {
+      for (uint8_t i=0; i < route.route_count; i++) {
+        MSG(" %08X", route.route[i]);
+      }
+    }
+    MSG(")\n");
+    return;
+  }
+
+  // NEIGHBORINFO MESSAGE
+  // /modules/NeighborInfoModule.cpp
+  if (d.portnum == meshtastic_PortNum_NEIGHBORINFO_APP){
+    MSG("NEIGHBORINFO ");
+    meshtastic_NeighborInfo np;
+    if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_NeighborInfo_msg, &np)) {
+      MSG("*** Error ***\n");
+      return;
+    }
+    MSG("(last sent by 0x%x) Number of neighbors=%d\n", np.last_sent_by_id, np.neighbors_count);
+    for (uint8_t i = 0; i < np.neighbors_count; i++) {
+        MSG("[0x%X, ", np.neighbors[i].node_id);
+        MSGFLOAT("snr=%.2f]\n", np.neighbors[i].snr);
+    }
+    return;
+  }
+
+  // ATAK PLUGIN MESSAGE
+  // /modules/AtakPluginModule.cpp
+  if (d.portnum == meshtastic_PortNum_ATAK_PLUGIN){
+    MSG("ATAK \n");    
+    return;
+  }
+
   // No known PortNum:
   MSG("\"");
-  for (uint32_t i=0; i < mp.payload.size; i++){
-    MSG("%X", mp.payload.bytes[i]);
+  for (uint32_t i=0; i < d.payload.size; i++){
+    MSG("%X", d.payload.bytes[i]);
   }
   MSG("\"\n");
   return;
+}
+
+// PacketQueueClass Definitions
+
+void PacketQueueClass::add(uint8_t* buf, size_t size) {
+  uint8_t idx = MAX_TX_QUEUE;
+  for (uint8_t i=0; i<(MAX_TX_QUEUE -1); i++) {
+    if (Queue[i].size == 0) {  // search for a free slot
+      idx = i;
+      break;
+    }
+  }
+  if (idx == MAX_TX_QUEUE) {  // no free slot, overwrite oldest packet
+    for (uint8_t i=1; i<(MAX_TX_QUEUE -1); i++) {
+      if (Queue[idx].packetTime < Queue[i].packetTime) idx = i;
+    }
+  }
+  Queue[idx].size = size;
+  Queue[idx].packetTime = (uint32_t)RtcGetTimerValue();
+  MSG("enQueue Index=%i Size=%i\n", idx, Queue[idx].size);
+  memcpy(Queue[idx].buf, buf, size);
+  hasPackets = true;
+}
+
+Packet_t* PacketQueueClass::pop(void) {
+  uint8_t idx = MAX_TX_QUEUE;
+  for (uint8_t i=0 ;i < (MAX_TX_QUEUE -1); i++ ){
+    if (Queue[i].size != 0) { // first not empty entry
+      idx = i;
+      break;
+    }
+  }
+  if (idx == MAX_TX_QUEUE) { // empty Queue
+    hasPackets = false;
+    return (Packet_t*)NULL;
+  }
+  for (uint8_t i=idx; i<(MAX_TX_QUEUE -1); i++) {
+    if ( (Queue[i].size != 0) && (Queue[idx].packetTime < Queue[i].packetTime) ) idx = i; // find oldest packet
+  }
+  return &Queue[idx];
+}
+
+void PacketQueueClass::clear(void) {
+  for (uint8_t i = 0; i<(MAX_TX_QUEUE - 1); i++) {
+    Queue[i].size = 0; // mark as "deleted"
+  }
+}
+
+// idStoreClass Definitions
+
+bool idStoreClass::add(uint32_t id) {
+  uint8_t idx = 0;
+  for (uint8_t i = MAX_ID_LIST; i > 0; i--) {
+    if (storage[i] == id){
+     return false; // packet ID is known, no update
+    }
+    if (storage[i] == 0) idx = i;
+  }
+  storage[idx] = id;
+  if (++idx <= MAX_ID_LIST) { 
+    storage[idx] = 0; 
+  } else {
+    storage[0] = 0;
+  }
+  return true; // new packet ID was added
+}
+
+void idStoreClass::clear(void) {
+  memset(this->storage, 0, sizeof(this->storage));
 }

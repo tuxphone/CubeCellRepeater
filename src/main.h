@@ -10,27 +10,47 @@
 #define CC_MY_LORA_BW       125.0   // use these settings, if not using a modem preset
 #define CC_MY_LORA_SF       10
 #define CC_MY_LORA_CR       5
-#define CC_MY_LORA_POWER    0       // 0 = max legal power for region
-#define CC_MY_LORA_FREQ     0.0     // if you want to override frequency calculation, in MHz (e.g. 869.4)
+#define CC_MY_LORA_POWER    20       // 0 = max legal power for region
+#define CC_MY_LORA_FREQ     0.0     // if you want to override frequency calculation: Freq in MHz (e.g. 869.4)
 
-#define CC_MAX_POWER        22      // TX power setting. Maximum for CubeCell is 22, enforced by RadioLib.
+#define CC_MAX_POWER        22      // TX power setting. Absolute Max for CubeCell is 22, enforced by RadioLib.
 
-#define MAX_ID_LIST 32 // number of stored packet IDs to prevent unnecesary repeating
-#define MAX_TX_QUEUE 16 // max number of packets which can be waiting for transmission
+#define MAX_ID_LIST  64 // number of stored packet IDs to prevent unnecesary repeating
+#define MAX_TX_QUEUE 24 // max number of packets which can be waiting for transmission
 #define MAX_RHPACKETLEN 256
-
-#include <RadioLib.h>
-#ifdef CUBECELL
-#include "cyPm.c"  // for reliable sleep we use MCU_deepSleep()
-    extern  uint32_t systime;   // CubeCell global system time count, Millis
-    SX1262 radio = new Module(RADIOLIB_BUILTIN_MODULE);
-#endif //CUBECELL
 
 /// 16 bytes of random PSK for our _public_ default channel that all devices power up on (AES128)
 /// Meshtastic default key (AQ==):
 static const uint8_t mypsk[] = {0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
                                 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01};
 // No Crypto = all zero
+
+#ifndef SILENT
+    #define MSG(...) Serial.printf(__VA_ARGS__)
+    #define MSGFLOAT(a,b) Serial.print(a); Serial.print(b)
+#else
+    #define MSG(...)
+    #define MSGFLOAT(a,b)
+#endif
+
+// Heltec borked the Arduino.h
+#ifdef __cplusplus
+#undef min
+#undef max
+#undef abs
+#include <algorithm>
+  using std::abs;
+  using std::max;
+  using std::min;
+#endif /* __cplusplus */
+
+#include <RadioLib.h>
+
+#ifdef CUBECELL
+#include "cyPm.c"  // for reliable sleep we use MCU_deepSleep()
+extern  uint32_t systime;   // CubeCell global system time count, Millis
+SX1262 radio = new Module(RADIOLIB_BUILTIN_MODULE);
+#endif
 
 #include <assert.h>
 #include <pb.h>
@@ -44,61 +64,81 @@ extern "C"
 #include <mesh/compression/unishox2.h>
 }
 
-CryptoKey psk;
-meshtastic_MeshPacket mp;
-
-uint8_t radiobuf[MAX_RHPACKETLEN -1];
-
 typedef struct {
     size_t   size;
     uint8_t  buf[MAX_RHPACKETLEN -1];
     uint32_t packetTime;
 } Packet_t;
 
-Packet_t txQueue[MAX_TX_QUEUE - 1];
-uint32_t idList[MAX_ID_LIST - 1];
+typedef struct {
+    uint32_t to, from;
+    uint32_t id;
+    uint8_t flags;
+    uint8_t channel;
+    uint8_t next_hop;
+    uint8_t relay_node;
+} PacketHeader; // see Meshtastic RadioInterface.h
+
+class PacketQueueClass {
+private:
+    Packet_t Queue[MAX_TX_QUEUE - 1];
+public:
+    void clear(void);
+    bool hasPackets = false;
+    void add(uint8_t* buf, size_t size);
+    Packet_t* pop(void);
+};
+PacketQueueClass txQueue;
+
+class idStoreClass {
+private:
+    uint32_t storage[MAX_ID_LIST];
+public:
+    void clear(void);
+    // add() returns false if the message id is already known
+    bool add(uint32_t id);
+};
+idStoreClass msgID;
+
+CryptoKey psk;
+meshtastic_MeshPacket mp;
+uint8_t radiobuf[MAX_RHPACKETLEN];
 bool repeatPacket = false;
-bool txQueueHasPacket = false;
 int state = RADIOLIB_ERR_NONE;
+Packet_t* p = NULL;
 
-void MCU_deepsleep(void);   
-void clearInterrupts(void);
+void MCU_deepsleep(void);
 void startReceive(void);
-bool update_idList(uint32_t id);
-void enqueueTX(uint8_t* buf, size_t size);
-uint8_t poptxQueue(void);
-void perhapsSend(uint8_t* buf, size_t size);
+bool perhapsSend(uint8_t* buf, size_t size);
+bool perhapsDecode(uint8_t* buf, size_t size);
+void printPacket(void);
+void printVariants(void);
 
-void printVariants(const meshtastic_MeshPacket *p);
-void printPacket(const char *prefix, const meshtastic_MeshPacket *p);
-bool perhapsDecode(meshtastic_MeshPacket *p);
+bool PacketReceived = false;
+bool PacketSent = false;
+volatile bool dio1 = false;
 
-// Flag and ISR for "Received packet" - events
-volatile bool PacketReceived = false;
-
-void ISR_setReceived(void) {
-    PacketReceived = true;
+void ISR_dio1Action(void) {
+     dio1 = true;
 }
-
-// Flag and ISR for "Packet sent" - events
-volatile bool PacketSent = false;
-
-void ISR_setPacketSent(void) {
-    PacketSent = true;  
-}
-
-#ifndef SILENT
-    #define MSG(...) Serial.printf(__VA_ARGS__)
-    #define MSGFLOAT(a,b) Serial.print(a); Serial.print(b)
-#else
-    #define MSG(...)
-    #define MSGFLOAT(a,b)
-#endif
-
 
 /**************
- * Meshtastic * 
+ * Meshtastic *     https://github.com/meshtastic/firmware
  **************/
+
+/** Slottime is the minimum time to wait, consisting of:
+      - CAD duration (maximum of SX126x and SX127x);
+      - roundtrip air propagation time (assuming max. 30km between nodes);
+      - Tx/Rx turnaround time (maximum of SX126x and SX127x);
+      - MAC processing time (measured on T-beam) */
+    uint32_t slotTimeMsec; //= 8.5 * pow(2, sf) / bw + 0.2 + 0.4 + 7;  --> calculated at applyModemConfig()
+    uint16_t preambleLength = 16;      // 8 is default, but we use longer to increase the amount of sleep time when receiving
+    uint32_t preambleTimeMsec = 165;   // calculated on startup, this is the default for LongFast
+    uint32_t maxPacketTimeMsec = 3246; // calculated on startup, this is the default for LongFast
+    const uint32_t PROCESSING_TIME_MSEC =
+        4500;                // time to construct, process and construct a packet again (empirically determined)
+    const uint8_t CWmin = 2; // minimum CWsize
+    const uint8_t CWmax = 8; // maximum CWsize
 
 #define PACKET_FLAGS_HOP_MASK 0x07
 #define PACKET_FLAGS_WANT_ACK_MASK 0x08
@@ -111,8 +151,7 @@ size_t pb_encode_to_bytes(uint8_t *destbuf, size_t destbufsize, const pb_msgdesc
     pb_ostream_t stream = pb_ostream_from_buffer(destbuf, destbufsize);
     if (!pb_encode(&stream, fields, src_struct)) {
         MSG("[ERROR]Panic: can't encode protobuf reason='%s'\n", PB_GET_ERROR(&stream));
-        assert(
-            0); // If this assert fails it probably means you made a field too large for the max limits specified in mesh.options
+        //assert(0); // If this assert fails it probably means you made a field too large for the max limits specified in mesh.options
     } else {
         return stream.bytes_written;
     }
@@ -148,7 +187,9 @@ struct RegionInfo {
     bool wideLora;
     const char *name; // EU433 etc
 };
+
 const RegionInfo *myRegion;
+
 const RegionInfo regions[] = {
     /*
         https://link.springer.com/content/pdf/bbm%3A978-1-4842-4357-2%2F1.pdf
@@ -269,10 +310,11 @@ const RegionInfo regions[] = {
 
 void initRegion()
 {
+    MSG("[INF]Init region List ...");
     const RegionInfo *r = regions;
-    for (; r->code != meshtastic_Config_LoRaConfig_RegionCode_UNSET && r->code != CC_MY_REGION; r++)
-        ;
+    for (; r->code != meshtastic_Config_LoRaConfig_RegionCode_UNSET && r->code != CC_MY_REGION; r++) ;
     myRegion = r;
+    MSG(" done!\n");
 }
 
 /** hash a string into an integer
@@ -330,10 +372,10 @@ int16_t generateHash(ChannelIndex channelNum)
 
 void applyModemConfig()
 {
-    float bw=0;
+    float   bw = 0;
     uint8_t sf = 0;
     uint8_t cr = 0;
-    int8_t power = 0; // 0 = max legal power for region
+    int8_t power = CC_MY_LORA_POWER; // 0 = max legal power for region
     float freq = 0;
 
     if (CC_LORA_USE_PRESET) {
@@ -425,14 +467,13 @@ void applyModemConfig()
         freq = CC_MY_LORA_FREQ;
         channel_num = -1;
     }
-
-    MSG("\nRegion %s (Power Limit is %idb) ",myRegion->name, myRegion->powerLimit);
-    MSG(" freq %d bw %i sf %i cr %i power %i  ... ", lround(freq*1E6), lround(bw*1000), sf, cr, power);
+    
+    MSG("[INF]Using Region %s freq %d bw %i sf %i cr %i power %i  ... ",myRegion->name, lround(freq*1E6), lround(bw*1000), sf, cr, power);
     
     // Syncword is 0x2b, see RadioLibInterface.h
     // preamble length is 16, see RadioInterface.h
-
-    int state = radio.begin(freq, bw, sf, cr, 0x2b, power, 16); 
+    
+    state = radio.begin(freq, bw, sf, cr, 0x2b, power, 16); 
 
     if (state == RADIOLIB_ERR_NONE) {
         MSG("success!\n");
@@ -440,5 +481,7 @@ void applyModemConfig()
         MSG("\n[ERROR] [SX1262} Init failed, code: %i\n\n ** Full Stop **", state);
         while (true);
     }
-    
+
+    // used to calculate wait time before repeating a packet
+    slotTimeMsec = 8.5 * pow(2, sf) / bw + 0.2 + 0.4 + 7;
 }
