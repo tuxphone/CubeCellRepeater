@@ -33,42 +33,24 @@ The node can decode meshtastic packets meeting some requirements:
 
 List of meshtastic-supported regions:
 
-**United States **
-meshtastic_Config_LoRaConfig_RegionCode_US
-** European Union 433mhz **
-meshtastic_Config_LoRaConfig_RegionCode_EU_433
-** European Union 868mhz **
-meshtastic_Config_LoRaConfig_RegionCode_EU_868      (default)
-** China **
-meshtastic_Config_LoRaConfig_RegionCode_CN
-** Japan **
-meshtastic_Config_LoRaConfig_RegionCode_JP
-** Australia / New Zealand **
-meshtastic_Config_LoRaConfig_RegionCode_ANZ
-** Korea **
-meshtastic_Config_LoRaConfig_RegionCode_KR
-** Taiwan **
-meshtastic_Config_LoRaConfig_RegionCode_TW
-** Russia **
-meshtastic_Config_LoRaConfig_RegionCode_RU
-** India **
-meshtastic_Config_LoRaConfig_RegionCode_IN
-** New Zealand 865mhz **
-meshtastic_Config_LoRaConfig_RegionCode_NZ_865
-** Thailand **
-meshtastic_Config_LoRaConfig_RegionCode_TH
-** WLAN Band **
-meshtastic_Config_LoRaConfig_RegionCode_LORA_24
-** Ukraine 433mhz **
-meshtastic_Config_LoRaConfig_RegionCode_UA_433
-** Ukraine 868mhz **
-meshtastic_Config_LoRaConfig_RegionCode_UA_868
-** Malaysia 433mhz **
-meshtastic_Config_LoRaConfig_RegionCode_MY_433
-** Malaysia 919mhz **
-meshtastic_Config_LoRaConfig_RegionCode_MY_919
-** Singapore 923mhz **
-meshtastic_Config_LoRaConfig_RegionCode_SG_923
+- United States meshtastic_Config_LoRaConfig_RegionCode_US
+- European Union 433mhz meshtastic_Config_LoRaConfig_RegionCode_EU_433
+- European Union 868mhz (default) meshtastic_Config_LoRaConfig_RegionCode_EU_868
+- China meshtastic_Config_LoRaConfig_RegionCode_CN
+- Japan meshtastic_Config_LoRaConfig_RegionCode_JP
+- Australia / New Zealand meshtastic_Config_LoRaConfig_RegionCode_ANZ
+- Korea meshtastic_Config_LoRaConfig_RegionCode_KR
+- Taiwan meshtastic_Config_LoRaConfig_RegionCode_TW
+- Russia meshtastic_Config_LoRaConfig_RegionCode_RU
+- India meshtastic_Config_LoRaConfig_RegionCode_IN
+- New Zealand 865mhz meshtastic_Config_LoRaConfig_RegionCode_NZ_865
+- Thailand meshtastic_Config_LoRaConfig_RegionCode_TH
+- WLAN Band meshtastic_Config_LoRaConfig_RegionCode_LORA_24
+- Ukraine 433mhz meshtastic_Config_LoRaConfig_RegionCode_UA_433
+- Ukraine 868mhz meshtastic_Config_LoRaConfig_RegionCode_UA_868
+- Malaysia 433mhz meshtastic_Config_LoRaConfig_RegionCode_MY_433
+- Malaysia 919mhz meshtastic_Config_LoRaConfig_RegionCode_MY_919
+- Singapore 923mhz meshtastic_Config_LoRaConfig_RegionCode_SG_923
 
 For lora modem settings you should always try the default (LongFast), it's proven to be THE setting to go for.
 If you want to try other presets, here is the list:
