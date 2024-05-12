@@ -32,41 +32,41 @@ The node can decode meshtastic packets meeting some requirements:
 ##Modifying radio settings:  edit the main.h
 
 List of meshtastic-supported regions:
-    /* United States */
+    **United States **
     meshtastic_Config_LoRaConfig_RegionCode_US
-    /* European Union 433mhz */
+    ** European Union 433mhz **
     meshtastic_Config_LoRaConfig_RegionCode_EU_433
-    /* European Union 868mhz */
+    ** European Union 868mhz **
     meshtastic_Config_LoRaConfig_RegionCode_EU_868      (default)
-    /* China */
+    ** China **
     meshtastic_Config_LoRaConfig_RegionCode_CN
-    /* Japan */
+    ** Japan **
     meshtastic_Config_LoRaConfig_RegionCode_JP
-    /* Australia / New Zealand */
+    ** Australia / New Zealand **
     meshtastic_Config_LoRaConfig_RegionCode_ANZ
-    /* Korea */
+    ** Korea **
     meshtastic_Config_LoRaConfig_RegionCode_KR
-    /* Taiwan */
+    ** Taiwan **
     meshtastic_Config_LoRaConfig_RegionCode_TW
-    /* Russia */
+    ** Russia **
     meshtastic_Config_LoRaConfig_RegionCode_RU
-    /* India */
+    ** India **
     meshtastic_Config_LoRaConfig_RegionCode_IN
-    /* New Zealand 865mhz */
+    ** New Zealand 865mhz **
     meshtastic_Config_LoRaConfig_RegionCode_NZ_865
-    /* Thailand */
+    ** Thailand **
     meshtastic_Config_LoRaConfig_RegionCode_TH
-    /* WLAN Band */
+    ** WLAN Band **
     meshtastic_Config_LoRaConfig_RegionCode_LORA_24
-    /* Ukraine 433mhz */
+    ** Ukraine 433mhz **
     meshtastic_Config_LoRaConfig_RegionCode_UA_433
-    /* Ukraine 868mhz */
+    ** Ukraine 868mhz **
     meshtastic_Config_LoRaConfig_RegionCode_UA_868
-    /* Malaysia 433mhz */
+    ** Malaysia 433mhz **
     meshtastic_Config_LoRaConfig_RegionCode_MY_433
-    /* Malaysia 919mhz */
+    ** Malaysia 919mhz **
     meshtastic_Config_LoRaConfig_RegionCode_MY_919
-    /* Singapore 923mhz */
+    ** Singapore 923mhz **
     meshtastic_Config_LoRaConfig_RegionCode_SG_923
 
 For lora modem settings you should always try the default (LongFast), it's proven to be THE setting to go for.
