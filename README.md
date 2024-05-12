@@ -55,11 +55,11 @@ List of meshtastic-supported regions:
 For lora modem settings you should always try the default (LongFast), it's proven to be THE setting to go for.
 If you want to try other presets, here is the list:
 
-meshtastic_Config_LoRaConfig_ModemPreset_SHORT_FAST
-meshtastic_Config_LoRaConfig_ModemPreset_SHORT_SLOW
-meshtastic_Config_LoRaConfig_ModemPreset_MEDIUM_FAST
-meshtastic_Config_LoRaConfig_ModemPreset_MEDIUM_SLOW
-meshtastic_Config_LoRaConfig_ModemPreset_LONG_FAST      (default)
-meshtastic_Config_LoRaConfig_ModemPreset_LONG_MODERATE
-meshtastic_Config_LoRaConfig_ModemPreset_LONG_SLOW
-meshtastic_Config_LoRaConfig_ModemPreset_VERY_LONG_SLOW
+- meshtastic_Config_LoRaConfig_ModemPreset_SHORT_FAST
+- meshtastic_Config_LoRaConfig_ModemPreset_SHORT_SLOW
+- meshtastic_Config_LoRaConfig_ModemPreset_MEDIUM_FAST
+- meshtastic_Config_LoRaConfig_ModemPreset_MEDIUM_SLOW
+- meshtastic_Config_LoRaConfig_ModemPreset_LONG_FAST      (default)
+- meshtastic_Config_LoRaConfig_ModemPreset_LONG_MODERATE
+- meshtastic_Config_LoRaConfig_ModemPreset_LONG_SLOW
+- meshtastic_Config_LoRaConfig_ModemPreset_VERY_LONG_SLOW
