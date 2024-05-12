@@ -1,5 +1,4 @@
 // This is the CryptoEngine for STM32WL, it works also for CubeCell
-
 #include "CryptoEngine.h"
 #include "aes.hpp"
 #include "configuration.h"
