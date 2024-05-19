@@ -44,6 +44,7 @@ static const uint8_t mypsk[] = {0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
   using std::min;
 #endif /* __cplusplus */
 
+
 #include <RadioLib.h>
 
 #ifdef CUBECELL
@@ -64,9 +65,10 @@ extern "C"
 #include <mesh/compression/unishox2.h>
 }
 
+// struct to store the raw packet data (buf, size) and the time of receiving
 typedef struct {
     size_t   size;
-    uint8_t  buf[MAX_RHPACKETLEN -1];
+    uint8_t  buf[MAX_RHPACKETLEN];
     uint32_t packetTime;
 } Packet_t;
 
@@ -84,9 +86,9 @@ private:
     Packet_t Queue[MAX_TX_QUEUE - 1];
 public:
     void clear(void);
-    bool hasPackets = false;
-    void add(uint8_t* buf, size_t size);
-    Packet_t* pop(void);
+    uint8_t Count = 0;
+    void add(Packet_t* p);
+    bool pop(void);
 };
 PacketQueueClass txQueue;
 
@@ -102,29 +104,44 @@ idStoreClass msgID;
 
 CryptoKey psk;
 meshtastic_MeshPacket mp;
-uint8_t radiobuf[MAX_RHPACKETLEN];
 bool repeatPacket = false;
-int state = RADIOLIB_ERR_NONE;
-Packet_t* p = NULL;
-
-void MCU_deepsleep(void);
-void startReceive(void);
-bool perhapsSend(uint8_t* buf, size_t size);
-bool perhapsDecode(uint8_t* buf, size_t size);
-void printPacket(void);
-void printVariants(void);
-
+int err = RADIOLIB_ERR_NONE;
 bool PacketReceived = false;
 bool PacketSent = false;
+bool isReceiving = false;
+
+/* Packet we are trying to send. 
+ * .packetTime is the time we started trying to send it.
+ * packet will be dropped after a minute of trying.
+ */ 
+Packet_t PacketToSend;
+Packet_t* p = NULL;
+
+// global dio1 flag - will be set to true, when dio1 is active
 volatile bool dio1 = false;
 
+// interrupt service routine for setting the dio1 flag
 void ISR_dio1Action(void) {
      dio1 = true;
 }
 
+void MCU_deepsleep(void);
+void startReceive(void);
+bool perhapsSend(Packet_t* p);
+bool perhapsDecode(Packet_t* p);
+void printPacket(void);
+void printVariants(void);
+
 /**************
  * Meshtastic *     https://github.com/meshtastic/firmware
  **************/
+    float   bw = 0;
+    uint8_t sf = 0;
+    uint8_t cr = 0;
+    int8_t power = CC_MY_LORA_POWER; // 0 = max legal power for region
+    float   freq = 0;
+    float    snr = 5.0;
+    uint32_t activeReceiveStart = 0;
 
 /** Slottime is the minimum time to wait, consisting of:
       - CAD duration (maximum of SX126x and SX127x);
@@ -363,21 +380,30 @@ int16_t generateHash(ChannelIndex channelNum)
     else {
         const char *name = CC_CHANNEL_NAME; //getName(channelNum);
         uint8_t h = xorHash((const uint8_t *)name, strlen(name));
-
         h ^= xorHash(k.bytes, k.length);
-
         return h;
     }
 }
 
+uint32_t getPacketTime(uint32_t pl)
+{
+    float bandwidthHz = bw * 1000.0f;
+    bool  headDisable = false; // we currently always use the header
+    float tSym = (1 << sf) / bandwidthHz;
+
+    bool lowDataOptEn = tSym > 16e-3 ? true : false; // Needed if symbol time is >16ms
+
+    float tPreamble = (preambleLength + 4.25f) * tSym;
+    float numPayloadSym =
+        8 + max(ceilf(((8.0f * pl - 4 * sf + 28 + 16 - 20 * headDisable) / (4 * (sf - 2 * lowDataOptEn))) * cr), 0.0f);
+    float tPayload = numPayloadSym * tSym;
+    float tPacket = tPreamble + tPayload;
+  
+    return (uint32_t)(tPacket * 1000);
+}
+
 void applyModemConfig()
 {
-    float   bw = 0;
-    uint8_t sf = 0;
-    uint8_t cr = 0;
-    int8_t power = CC_MY_LORA_POWER; // 0 = max legal power for region
-    float freq = 0;
-
     if (CC_LORA_USE_PRESET) {
 
         switch (CC_MY_LORA_PRESET) {
@@ -473,15 +499,64 @@ void applyModemConfig()
     // Syncword is 0x2b, see RadioLibInterface.h
     // preamble length is 16, see RadioInterface.h
     
-    state = radio.begin(freq, bw, sf, cr, 0x2b, power, 16); 
+    err = radio.begin(freq, bw, sf, cr, 0x2b, power, 16); 
 
-    if (state == RADIOLIB_ERR_NONE) {
+    if (err == RADIOLIB_ERR_NONE) {
         MSG("success!\n");
     } else {
-        MSG("\n[ERROR] [SX1262} Init failed, code: %i\n\n ** Full Stop **", state);
+        MSG("\n[ERROR] [SX1262} Init failed, code: %i\n\n ** Full Stop **", err);
         while (true);
     }
 
     // used to calculate wait time before repeating a packet
     slotTimeMsec = 8.5 * pow(2, sf) / bw + 0.2 + 0.4 + 7;
+    preambleTimeMsec = getPacketTime((uint32_t)0);
+    maxPacketTimeMsec = getPacketTime(meshtastic_Constants_DATA_PAYLOAD_LEN + sizeof(PacketHeader));
+    MSG("[INF]SlotTime=%ims PreambleTime=%ims maxPacketTime=%ims\n", slotTimeMsec, preambleTimeMsec, maxPacketTimeMsec);
+}
+
+/** The delay to use when we want to flood a message */
+uint32_t getTxDelayMsecWeighted(float snr) // RadioInterface.cpp
+{
+    // The minimum value for a LoRa SNR
+    const uint32_t SNR_MIN = -20;
+
+    // The maximum value for a LoRa SNR
+    const uint32_t SNR_MAX = 15;
+
+    //  high SNR = large CW size (Long Delay)
+    //  low SNR = small CW size (Short Delay)
+    uint32_t delay = 0;
+    uint8_t CWsize = map(snr, SNR_MIN, SNR_MAX, CWmin, CWmax);
+
+    // our role is meshtastic_Config_DeviceConfig_Role_REPEATER
+    delay = random(0, 2 * CWsize) * slotTimeMsec;
+    return delay;
+}
+
+bool isActivelyReceiving()
+{
+    // The IRQ status will be cleared when we start our read operation. Check if we've started a header, but haven't yet
+    // received and handled the interrupt for reading the packet/handling errors.
+
+    uint16_t irq = radio.getIrqStatus();
+    bool detected = (irq & (RADIOLIB_SX126X_IRQ_HEADER_VALID | RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED));
+    // Handle false detections
+    if (detected) {
+        uint32_t now = millis();
+        if (!activeReceiveStart) {
+            activeReceiveStart = now;
+        } else if ((now - activeReceiveStart > 2 * preambleTimeMsec) && !(irq & RADIOLIB_SX126X_IRQ_HEADER_VALID)) {
+            // The HEADER_VALID flag should be set by now if it was really a packet, so ignore PREAMBLE_DETECTED flag
+            activeReceiveStart = 0;
+            MSG("Ignore false preamble detection.\n");
+            return false;
+        } else if (now - activeReceiveStart > maxPacketTimeMsec) {
+            // We should have gotten an RX_DONE IRQ by now if it was really a packet, so ignore HEADER_VALID flag
+            activeReceiveStart = 0;
+            MSG("Ignore false header detection.\n");
+            return false;
+        }
+    }
+    return detected;
 }
