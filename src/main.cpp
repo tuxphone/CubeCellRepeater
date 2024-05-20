@@ -32,16 +32,6 @@ void loop() {
       PacketSent = false;
       startReceive();
     }
-    // other dio1 event
-    /*
-    if (!(p == NULL)) {
-      // drop packet, if we could not send it in 1 minute
-      if ( (p->packetTime + 60*1000) < millis() ) p = NULL;
-      MSG("[INF] TX aborted, could not send packet in 1 minute\n\r");
-      startReceive();
-
-    }
-    */
   }
 
   if (PacketReceived) {
@@ -67,8 +57,10 @@ void loop() {
       repeatPacket = msgID.add(h->id);
       // print new packets only not repeated due to HopLim 0
       if ((repeatPacket) && (hop_limit==0)) {
-        MSG("\n\r");        
+        MSG("\n\r");
+        #ifndef SILENT      
         perhapsDecode(&pck);
+        #endif
       }
       if (hop_limit == 0) repeatPacket = false;
       // do not repeat if id is known or hop limit is zero
@@ -122,7 +114,9 @@ void loop() {
       if (perhapsSend(p) ) {
         // packet successfully sent
         // try to decode the packet and print it
+        #ifndef SILENT
         perhapsDecode(p);
+        #endif
         PacketSent = true;
         p = NULL; 
       } else {      
@@ -514,6 +508,7 @@ bool PacketQueueClass::pop(void) {
   PacketToSend.packetTime = millis(); // start timer. after 1 minute, drop packet
   PacketToSend.size = Queue[idx].size;
   memcpy(PacketToSend.buf, Queue[idx].buf, Queue[idx].size);
+  Queue[idx].size = 0;
   this->Count -= 1;
   return true;
 }
