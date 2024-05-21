@@ -8,7 +8,7 @@
 #define CC_CHANNEL_NAME     "Primary Channel"
 
 #define CC_MY_LORA_BW       125.0   // use these settings, if not using a modem preset
-#define CC_MY_LORA_SF       10
+#define CC_MY_LORA_SF       9
 #define CC_MY_LORA_CR       5
 #define CC_MY_LORA_POWER    20       // 0 = max legal power for region
 #define CC_MY_LORA_FREQ     0.0     // if you want to override frequency calculation: Freq in MHz (e.g. 869.4)
@@ -16,7 +16,8 @@
 #define CC_MAX_POWER        22      // TX power setting. Absolute Max for CubeCell is 22, enforced by RadioLib.
 
 #define MAX_ID_LIST  64 // number of stored packet IDs to prevent unnecesary repeating
-#define MAX_TX_QUEUE 24 // max number of packets which can be waiting for transmission
+#define MAX_NODE_LIST 20 // number of stored known nodes
+#define MAX_TX_QUEUE 8 // max number of packets which can be waiting for transmission
 #define MAX_RHPACKETLEN 256
 
 /// 16 bytes of random PSK for our _public_ default channel that all devices power up on (AES128)
@@ -83,14 +84,13 @@ typedef struct {
 
 class PacketQueueClass {
 private:
-    Packet_t Queue[MAX_TX_QUEUE - 1];
+    Packet_t Queue[MAX_TX_QUEUE];
 public:
     void clear(void);
     uint8_t Count = 0;
     void add(Packet_t* p);
     bool pop(void);
-};
-PacketQueueClass txQueue;
+} txQueue;
 
 class idStoreClass {
 private:
@@ -99,20 +99,31 @@ public:
     void clear(void);
     // add() returns false if the message id is already known
     bool add(uint32_t id);
-};
-idStoreClass msgID;
+} msgID;
+
+class NodeStoreClass {
+private:
+    meshtastic_NodeInfo nodeDB[MAX_NODE_LIST];
+    void add(meshtastic_NodeInfo* Node);
+public:
+    void clear(void);
+    void update(meshtastic_NodeInfo* Node);
+    // get the short name of the node. "" if unknown.
+    char* get(uint32_t num);
+} NodeDB;
 
 CryptoKey psk;
 meshtastic_MeshPacket mp;
+meshtastic_NodeInfo theNode;
 bool repeatPacket = false;
 int err = RADIOLIB_ERR_NONE;
 bool PacketReceived = false;
 bool PacketSent = false;
 bool isReceiving = false;
 
-/* Packet we are trying to send. 
+/* Packet we are currently wanting to send 
  * .packetTime is the time we started trying to send it.
- * packet will be dropped after a minute of trying.
+ * packet will be dropped after a minute.
  */ 
 Packet_t PacketToSend;
 Packet_t* p = NULL;

@@ -3,6 +3,7 @@
 void setup() {
   msgID.clear();
   txQueue.clear();
+  NodeDB.clear();
   #ifndef SILENT
   Serial.begin(115200);
   #endif
@@ -45,7 +46,7 @@ void loop() {
     }
     err = radio.readData(pck.buf, pck.size);
     PacketHeader* h = (PacketHeader *)pck.buf;
-    snr = radio.getRSSI();
+    snr = radio.getSNR();
     if (err == RADIOLIB_ERR_NONE) {
       const int32_t payloadLen = pck.size - sizeof(PacketHeader);
       if (payloadLen < 0) {
@@ -53,13 +54,14 @@ void loop() {
         return; // will not repeat, continue receiving
       }
       const uint8_t hop_limit = h->flags & PACKET_FLAGS_HOP_MASK;
-      MSG("\n\r[NEW](id=0x%08X) (HopLim %d) ", h->id, hop_limit);
+      MSG("[NEW](id=0x%08X) (HopLim %d) ", h->id, hop_limit);
       repeatPacket = msgID.add(h->id);
       // print new packets only not repeated due to HopLim 0
       if ((repeatPacket) && (hop_limit==0)) {
         MSG("\n\r");
         #ifndef SILENT      
         perhapsDecode(&pck);
+        MSG("\n\r");
         #endif
       }
       if (hop_limit == 0) repeatPacket = false;
@@ -80,18 +82,19 @@ void loop() {
 
   if ( (txQueue.Count > 0) || !(p==NULL) ) { 
     uint32_t now = millis();
+    // we have packets in queue and currently no packet to transmit
     if (p == NULL) {
       if ( txQueue.pop() ) {
         p = &PacketToSend;
       }
     }
-    // resume recieving in case we popped an empty packet
+    // resume receiving in case we popped an empty packet
     if (p == NULL) {
       PacketSent = true; 
       return;
     } 
       
-    if (p->size > 0) {       
+    if (p->size > 0) {  // size == 0 means "deleted", we don't send deleted packets
       uint32_t wait = getTxDelayMsecWeighted(snr);
 
       MSG("[INF]wait %i ms before TX\n\r", wait);
@@ -116,6 +119,7 @@ void loop() {
         // try to decode the packet and print it
         #ifndef SILENT
         perhapsDecode(p);
+        MSG("\n\r");
         #endif
         PacketSent = true;
         p = NULL; 
@@ -173,6 +177,7 @@ void startReceive(){
   MSG("[RX] ... \n\r");
 }
 
+// send packet (blocking), MCU sleeps while waiting for TX DONE
 bool perhapsSend(Packet_t* p) {
   if (p->size > RADIOLIB_SX126X_MAX_PACKET_LENGTH) {
     MSG("\n\r[INF]Packet size is %i! Reducing to %i. Sending ...", p->size, RADIOLIB_SX126X_MAX_PACKET_LENGTH);
@@ -182,7 +187,7 @@ bool perhapsSend(Packet_t* p) {
   radio.finishTransmit();
   dio1 = false;
   PacketHeader* h = (PacketHeader *)p->buf;
-  MSG("\n\r[TX](id=0x%08X) HopLim=%i  ", h->id, (h->flags & PACKET_FLAGS_HOP_MASK));
+  MSG("[TX] (id=0x%08X) HopLim=%i  ", h->id, (h->flags & PACKET_FLAGS_HOP_MASK));
   err=radio.startTransmit(p->buf, p->size);
   isReceiving = false;
   if (err == RADIOLIB_ERR_NONE) {
@@ -198,7 +203,6 @@ bool perhapsSend(Packet_t* p) {
   dio1 = false;
   radio.finishTransmit(); 
   return ( err & RADIOLIB_SX126X_IRQ_TX_DONE );
-  return true;
 }
 
 bool perhapsDecode(Packet_t* p) {
@@ -214,8 +218,8 @@ bool perhapsDecode(Packet_t* p) {
   mp.hop_limit += 1;
   mp.want_ack  = h->flags & PACKET_FLAGS_WANT_ACK_MASK;
   mp.via_mqtt  = h->flags & PACKET_FLAGS_VIA_MQTT_MASK;
-  mp.rx_snr  = radio.getSNR();
-  mp.rx_rssi = lround(snr);
+  mp.rx_snr  = snr;
+  mp.rx_rssi = lround(radio.getRSSI());
   mp.which_payload_variant = meshtastic_MeshPacket_encrypted_tag;
   mp.encrypted.size = 0;
   static uint8_t scratchbuf[MAX_RHPACKETLEN];
@@ -242,6 +246,12 @@ bool perhapsDecode(Packet_t* p) {
       mp.decoded.portnum = meshtastic_PortNum_TEXT_MESSAGE_APP;
     }
     */
+    memset(theNode.user.short_name, 0, 5);
+    memset(theNode.user.long_name, 0, 40);
+    theNode.num = mp.from;
+    theNode.has_user = false;
+    theNode.has_position = false;
+    theNode.has_device_metrics = false;
     printPacket();
     return true;
   }
@@ -250,8 +260,8 @@ bool perhapsDecode(Packet_t* p) {
 }
 
 void printPacket(void) {
-  MSG("[INF](id=0x%08X) from=0x%.2X to=0x%.2X, WantAck=%s, HopLim=%d Ch=0x%X", 
-        mp.id, mp.from, mp.to, (mp.want_ack)? "YES":"NO", mp.hop_limit, mp.channel);
+  MSG("[INF](id=0x%08X) from=0x%.2X(%s) to=0x%.2X(%s), WantAck=%s, HopLim=%d Ch=0x%X", 
+        mp.id, mp.from, NodeDB.get(mp.from), mp.to, NodeDB.get(mp.to), (mp.want_ack)? "YES":"NO", mp.hop_limit, mp.channel);
   if (mp.which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
     auto &s = mp.decoded;
     MSG(" Portnum=%d", s.portnum);
@@ -282,6 +292,7 @@ void printVariants(void){
   if (d.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP){
     MSG("TEXT ");
     MSG("\"%.*s\"\n\r", d.payload.size, d.payload.bytes);
+    NodeDB.update(&theNode); // update last heard
     return;
   }
 
@@ -294,7 +305,7 @@ void printVariants(void){
       MSG("*** Error ***\n\r");
       return;
     }
-    
+    NodeDB.update(&theNode); // update last seen
     return;
   }
 
@@ -308,11 +319,12 @@ void printVariants(void){
       return;
     }
     // Log packet size and data fields
-    MSG("Node=%08X l=%d latI=%d lonI=%d msl=%d hae=%d geo=%d pdop=%d hdop=%d vdop=%d siv=%d fxq=%d fxt=%d pts=%d "
+    MSG("Node=%08X(%s) l=%d latI=%d lonI=%d msl=%d hae=%d geo=%d pdop=%d hdop=%d vdop=%d siv=%d fxq=%d fxt=%d pts=%d "
              "time=%d\n\r",
-             mp.from, d.payload.size, pos.latitude_i, pos.longitude_i, pos.altitude, pos.altitude_hae,
+             mp.from, NodeDB.get(mp.from), d.payload.size, pos.latitude_i, pos.longitude_i, pos.altitude, pos.altitude_hae,
              pos.altitude_geoidal_separation, pos.PDOP, pos.HDOP, pos.VDOP, pos.sats_in_view, pos.fix_quality, pos.fix_type, pos.timestamp,
              pos.time);
+    NodeDB.update(&theNode); // update last heard
     return;
   }
   
@@ -331,6 +343,10 @@ void printVariants(void){
       MSG("%0X",user.macaddr[i]);
     }
     MSG(" HW model: %i role: %i\n\r", (uint8_t)user.hw_model, (uint8_t)user.role);
+    theNode.has_user = true;
+    strncpy(theNode.user.short_name, user.short_name, sizeof(theNode.user.short_name) - 1);
+    strncpy(theNode.user.long_name, user.long_name, sizeof(theNode.user.long_name) - 1);
+    NodeDB.update(&theNode); // update user info
     return;
   }
 
@@ -356,11 +372,13 @@ void printVariants(void){
 
     }
     */
+    NodeDB.update(&theNode); // update last heard
     return;
   }
 
   // TELEMETRY MESSAGE
   if (d.portnum == meshtastic_PortNum_TELEMETRY_APP){
+    NodeDB.update(&theNode); // update last heard
     MSG("TELEMETRY");
     meshtastic_Telemetry telemetry;
     meshtastic_Telemetry *t = &telemetry;
@@ -418,6 +436,7 @@ void printVariants(void){
   // TRACEROUTE MESSAGE
   // /modules/TraceRouteModule.cpp
   if (d.portnum == meshtastic_PortNum_TRACEROUTE_APP){
+    NodeDB.update(&theNode); // update last heard
     MSG("TRACEROUTE");
     meshtastic_RouteDiscovery route;
     if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_RouteDiscovery_msg, &route)) {
@@ -437,6 +456,7 @@ void printVariants(void){
   // NEIGHBORINFO MESSAGE
   // /modules/NeighborInfoModule.cpp
   if (d.portnum == meshtastic_PortNum_NEIGHBORINFO_APP){
+    NodeDB.update(&theNode); // update last heard
     MSG("NEIGHBORINFO ");
     meshtastic_NeighborInfo np;
     if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_NeighborInfo_msg, &np)) {
@@ -454,12 +474,14 @@ void printVariants(void){
   // ATAK PLUGIN MESSAGE
   // /modules/AtakPluginModule.cpp
   if (d.portnum == meshtastic_PortNum_ATAK_PLUGIN){
+    NodeDB.update(&theNode); // update last heard
     MSG("ATAK \n\r");    
     return;
   }
 
   // No known PortNum:
   MSG("UNKNOWN #%i \"", d.portnum);
+  NodeDB.update(&theNode); // update last heard
   for (uint32_t i=0; i < d.payload.size; i++){
     MSG("%X", d.payload.bytes[i]);
   }
@@ -524,7 +546,7 @@ void PacketQueueClass::clear(void) {
 
 bool idStoreClass::add(uint32_t id) {
   uint8_t idx = 0;
-  for (uint8_t i = MAX_ID_LIST; i > 0; i--) {
+  for (int i = MAX_ID_LIST-1; i >= 0; i--) {
     if (storage[i] == id){
      return false; // packet ID is known, no update
     }
@@ -541,4 +563,79 @@ bool idStoreClass::add(uint32_t id) {
 
 void idStoreClass::clear(void) {
   memset(this->storage, 0, sizeof(this->storage));
+}
+
+// NodeStoreClass Definitions
+
+void NodeStoreClass::clear(void) {
+  for (uint8_t i=1; i < (MAX_NODE_LIST - 1); i++) {
+    this->nodeDB[i].has_user = false;
+    memset(this->nodeDB[i].user.short_name, 0, 5);
+    this->nodeDB[i].num = 0;
+  }
+  this->nodeDB[0].has_user = true;
+  this->nodeDB[0].num = 0xFFFFFFFF;
+  this->nodeDB[0].last_heard = 0xFFFFFFFF;
+  strncpy(this->nodeDB[0].user.short_name, "ALL", 3);
+  strncpy(this->nodeDB[0].user.long_name, "Channel Broadcast", 17);
+}
+    
+// returns false if the Node is already known
+void NodeStoreClass::update(meshtastic_NodeInfo* Node) {
+  uint8_t idx = MAX_NODE_LIST;
+  // check if it is a known Node Number
+  for (uint8_t i=0; i < (MAX_NODE_LIST - 1); i++) {
+    if (this->nodeDB[i].has_user) {
+      if (this->nodeDB[i].num == Node->num) {
+        // known Node
+        idx = i;
+        break;
+      }
+    }
+  }
+  if (idx < MAX_NODE_LIST) {
+    this->nodeDB[idx].last_heard = millis();
+    if (Node->has_user) {
+      strncpy(this->nodeDB[idx].user.short_name, Node->user.short_name, sizeof(this->nodeDB[idx].user.short_name) - 1);
+      strncpy(this->nodeDB[idx].user.long_name,  Node->user.long_name,  sizeof(this->nodeDB[idx].user.long_name)  - 1);
+    }
+  } else { // new entry
+    this->add(Node);
+  }
+}
+
+// get the short name of the node. "" if unknown.
+char* NodeStoreClass::get(uint32_t num) {
+  for (uint8_t i=0; i < MAX_NODE_LIST; i++) {
+    if (this->nodeDB[i].has_user) {
+      if (this->nodeDB[i].num == num) {
+        return this->nodeDB[i].user.short_name;
+      }
+    }
+  }
+  return "";
+}
+
+void NodeStoreClass::add(meshtastic_NodeInfo* Node) {
+  Node->last_heard = millis();
+  uint8_t idx = 0;
+  for (uint8_t i=1; i < (MAX_NODE_LIST - 1); i++) {
+    if (!this->nodeDB[i].has_user) {
+      idx = i;
+      break; // found unused slot
+    } else {
+      // find oldest node (longest time not heard from), overwrite if necessary
+      if (this->nodeDB[i].last_heard < this->nodeDB[idx].last_heard) {
+        idx = i;
+      }
+    }
+  }
+  //assert(idx != 0);
+  this->nodeDB[idx].num = Node->num;;
+  this->nodeDB[idx].has_user = true;
+  this->nodeDB[idx].last_heard = Node->last_heard;
+  if (Node->has_user) {
+    strncpy(this->nodeDB[idx].user.short_name, Node->user.short_name, sizeof(this->nodeDB[idx].user.short_name) - 1);
+    strncpy(this->nodeDB[idx].user.long_name,  Node->user.long_name,  sizeof(this->nodeDB[idx].user.long_name)  - 1);
+  }
 }
