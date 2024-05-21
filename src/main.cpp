@@ -1,13 +1,14 @@
 #include <main.h>
 
 void setup() {
-  msgID.clear();
-  txQueue.clear();
-  NodeDB.clear();
   #ifndef SILENT
   Serial.begin(115200);
   #endif
 
+  msgID.clear();
+  txQueue.clear();
+  NodeDB.clear();
+  
   MSG("[INF][CryptoEngine]Initializing ... ");
   memcpy(psk.bytes, mypsk, sizeof(mypsk));
   psk.length = sizeof(psk.bytes);

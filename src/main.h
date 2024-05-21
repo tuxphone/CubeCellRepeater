@@ -1,7 +1,7 @@
 #include <Arduino.h>
 
 // #define SILENT           // turn off serial output
-
+#define CC_MY_NODE_NUM      0xC00BCE11
 #define CC_MY_REGION        meshtastic_Config_LoRaConfig_RegionCode_EU_868     // see regions[] below
 #define CC_MY_LORA_PRESET   meshtastic_Config_LoRaConfig_ModemPreset_LONG_FAST // LONG FAST is default preset
 #define CC_LORA_USE_PRESET  true   // set true to use modem preset
@@ -19,6 +19,11 @@
 #define MAX_NODE_LIST 20 // number of stored known nodes
 #define MAX_TX_QUEUE 8 // max number of packets which can be waiting for transmission
 #define MAX_RHPACKETLEN 256
+#define PACKET_FLAGS_HOP_LIMIT_MASK 0x07
+#define PACKET_FLAGS_WANT_ACK_MASK 0x08
+#define PACKET_FLAGS_VIA_MQTT_MASK 0x10
+#define PACKET_FLAGS_HOP_START_MASK 0xE0
+#define PACKET_FLAGS_HOP_START_SHIFT 5
 
 /// 16 bytes of random PSK for our _public_ default channel that all devices power up on (AES128)
 /// Meshtastic default key (AQ==):
