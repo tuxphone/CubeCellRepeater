@@ -3,6 +3,7 @@
 void setup() {
   #ifndef SILENT
   Serial.begin(115200);
+  delay(5000);
   #endif
 
   msgID.clear();
@@ -11,7 +12,7 @@ void setup() {
   
   MSG("[INF][CryptoEngine]Initializing ... ");
   memcpy(psk.bytes, mypsk, sizeof(mypsk));
-  psk.length = sizeof(psk.bytes);
+  psk.length = sizeof(mypsk);
   crypto->setKey(psk);
 
   initRegion();       // create regions[] and load myRegion
@@ -247,8 +248,8 @@ bool perhapsDecode(Packet_t* p) {
       mp.decoded.portnum = meshtastic_PortNum_TEXT_MESSAGE_APP;
     }
     */
-    memset(theNode.user.short_name, 0, 5);
-    memset(theNode.user.long_name, 0, 40);
+    memset(theNode.user.short_name, 0, sizeof(theNode.user.short_name));
+    memset(theNode.user.long_name, 0, sizeof(theNode.user.long_name));
     theNode.num = mp.from;
     theNode.has_user = false;
     theNode.has_position = false;
@@ -355,7 +356,6 @@ void printVariants(void){
   // /modules/RoutingModule.cpp
    if (d.portnum == meshtastic_PortNum_ROUTING_APP){
     MSG("ROUTING \n\r");
-    /*
     meshtastic_Routing r;
     if (!pb_decode_from_bytes(d.payload.bytes, d.payload.size, &meshtastic_Routing_msg, &r)) {
       MSG("*** Error ***\n\r");
@@ -363,6 +363,7 @@ void printVariants(void){
     }
     if (r.which_variant == sizeof(meshtastic_Routing_Error) ) {
       MSG("RoutingError=%i\n\r", r.error_reason);
+    /*  
     } else {
       MSG("RouteRequest ["); 
       for (uint8_t i=0; i < r.route_request.route_count; i++) MSG("0x%X ", r.route_request.route[i]);
@@ -370,9 +371,8 @@ void printVariants(void){
       MSG("RouteReply ["); 
       for (uint8_t i=0; i < r.route_reply.route_count; i++) MSG("0x%X ", r.route_reply.route[i]);
       MSG("]\n\r");
-
-    }
     */
+    }
     NodeDB.update(&theNode); // update last heard
     return;
   }
@@ -494,14 +494,14 @@ void printVariants(void){
 
 void PacketQueueClass::add(Packet_t* p) {
   uint8_t idx = MAX_TX_QUEUE;
-  for (uint8_t i=0; i<(MAX_TX_QUEUE -1); i++) {
+  for (uint8_t i=0; i<(MAX_TX_QUEUE-1); i++) {
     if (Queue[i].size == 0) {  // search for a free slot
       idx = i;
       break;
     }
   }
   if (idx == MAX_TX_QUEUE) {  // no free slot, overwrite oldest packet
-    for (uint8_t i=1; i<(MAX_TX_QUEUE -1); i++) {
+    for (uint8_t i=1; i<(MAX_TX_QUEUE-1); i++) {
       if (Queue[idx].packetTime < Queue[i].packetTime) idx = i;
     }
   }

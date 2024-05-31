@@ -5,7 +5,8 @@
 #define CC_MY_REGION        meshtastic_Config_LoRaConfig_RegionCode_EU_868     // see regions[] below
 #define CC_MY_LORA_PRESET   meshtastic_Config_LoRaConfig_ModemPreset_LONG_FAST // LONG FAST is default preset
 #define CC_LORA_USE_PRESET  true   // set true to use modem preset
-#define CC_CHANNEL_NAME     "Primary Channel"
+#define CC_CHANNEL_NAME     "LongFast"
+#define CC_CHANNEL_SLOT     0  // "0" for calculated slot. Any other number = chosen slot. Count starts with 1.
 
 #define CC_MY_LORA_BW       125.0   // use these settings, if not using a modem preset
 #define CC_MY_LORA_SF       9
@@ -19,11 +20,6 @@
 #define MAX_NODE_LIST 20 // number of stored known nodes
 #define MAX_TX_QUEUE 8 // max number of packets which can be waiting for transmission
 #define MAX_RHPACKETLEN 256
-#define PACKET_FLAGS_HOP_LIMIT_MASK 0x07
-#define PACKET_FLAGS_WANT_ACK_MASK 0x08
-#define PACKET_FLAGS_VIA_MQTT_MASK 0x10
-#define PACKET_FLAGS_HOP_START_MASK 0xE0
-#define PACKET_FLAGS_HOP_START_SHIFT 5
 
 /// 16 bytes of random PSK for our _public_ default channel that all devices power up on (AES128)
 /// Meshtastic default key (AQ==):
@@ -50,6 +46,11 @@ static const uint8_t mypsk[] = {0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
   using std::min;
 #endif /* __cplusplus */
 
+#define PACKET_FLAGS_HOP_LIMIT_MASK 0x07
+#define PACKET_FLAGS_WANT_ACK_MASK 0x08
+#define PACKET_FLAGS_VIA_MQTT_MASK 0x10
+#define PACKET_FLAGS_HOP_START_MASK 0xE0
+#define PACKET_FLAGS_HOP_START_SHIFT 5
 
 #include <RadioLib.h>
 
@@ -65,12 +66,12 @@ SX1262 radio = new Module(RADIOLIB_BUILTIN_MODULE);
 #include <pb_decode.h>
 #include <pb_encode.h>
 #include <CryptoEngine.h>
-
+/*
 extern "C"
 { 
 #include <mesh/compression/unishox2.h>
 }
-
+*/
 // struct to store the raw packet data (buf, size) and the time of receiving
 typedef struct {
     size_t   size;
@@ -388,17 +389,17 @@ uint8_t xorHash(const uint8_t *p, size_t len)
  * If no suitable channel could be found, return -1
  */
 
-int16_t generateHash(ChannelIndex channelNum)
+int16_t generateHash(const char *name)
 {
-    auto k = psk; //getKey(channelNum);
+   /* auto k = getKey(channelNum);
     if (k.length < 0)
         return -1; // invalid
-    else {
-        const char *name = CC_CHANNEL_NAME; //getName(channelNum);
+    else {*/
+        //const char *name = getName(channelNum);
         uint8_t h = xorHash((const uint8_t *)name, strlen(name));
-        h ^= xorHash(k.bytes, k.length);
+        h ^= xorHash(psk.bytes, psk.length);
         return h;
-    }
+    //}
 }
 
 uint32_t getPacketTime(uint32_t pl)
@@ -499,9 +500,16 @@ void applyModemConfig()
     uint32_t numChannels = floor((myRegion->freqEnd - myRegion->freqStart) / (myRegion->spacing + (bw / 1000)));
 
     const char *channelName = CC_CHANNEL_NAME; 
+    int channel_num;
 
-    int channel_num = hash(channelName) % numChannels;
+    if (CC_CHANNEL_SLOT == 0) {
+        channel_num = hash(channelName) % numChannels;
+    } else {
+        channel_num = (CC_CHANNEL_SLOT-1) % numChannels;
+    }
 
+    MSG("[INF]Channel name is \"%s\"\n\r", channelName);
+    MSG("[INF]Channel slot is %i (%i available frequency slots).\n\r", channel_num + 1, numChannels);
     freq = myRegion->freqStart + (bw / 2000) + (channel_num * (bw / 1000));
 
     // override if we have a verbatim frequency
@@ -510,7 +518,7 @@ void applyModemConfig()
         channel_num = -1;
     }
     
-    MSG("[INF]Using Region %s freq %d bw %i sf %i cr %i power %i  ... ",myRegion->name, lround(freq*1E6), lround(bw*1000), sf, cr, power);
+    MSG("[INF]Using Region %s : freq=%d bw=%i sf=%i cr=%i power=%i ... ",myRegion->name, lround(freq*1E6), lround(bw*1000), sf, cr, power);
     
     // Syncword is 0x2b, see RadioLibInterface.h
     // preamble length is 16, see RadioInterface.h
@@ -520,7 +528,7 @@ void applyModemConfig()
     if (err == RADIOLIB_ERR_NONE) {
         MSG("success!\n");
     } else {
-        MSG("\n[ERROR] [SX1262} Init failed, code: %i\n\n ** Full Stop **", err);
+        MSG("\n[ERROR] [SX1262} Init failed, code: %i\n\n\r ** Full Stop **", err);
         while (true);
     }
 
@@ -528,7 +536,7 @@ void applyModemConfig()
     slotTimeMsec = 8.5 * pow(2, sf) / bw + 0.2 + 0.4 + 7;
     preambleTimeMsec = getPacketTime((uint32_t)0);
     maxPacketTimeMsec = getPacketTime(meshtastic_Constants_DATA_PAYLOAD_LEN + sizeof(PacketHeader));
-    MSG("[INF]SlotTime=%ims PreambleTime=%ims maxPacketTime=%ims\n", slotTimeMsec, preambleTimeMsec, maxPacketTimeMsec);
+    MSG("[INF]SlotTime=%ims PreambleTime=%ims maxPacketTime=%ims\n\r", slotTimeMsec, preambleTimeMsec, maxPacketTimeMsec);
 }
 
 /** The delay to use when we want to flood a message */
@@ -565,12 +573,12 @@ bool isActivelyReceiving()
         } else if ((now - activeReceiveStart > 2 * preambleTimeMsec) && !(irq & RADIOLIB_SX126X_IRQ_HEADER_VALID)) {
             // The HEADER_VALID flag should be set by now if it was really a packet, so ignore PREAMBLE_DETECTED flag
             activeReceiveStart = 0;
-            MSG("Ignore false preamble detection.\n");
+            MSG("Ignore false preamble detection.\n\r");
             return false;
         } else if (now - activeReceiveStart > maxPacketTimeMsec) {
             // We should have gotten an RX_DONE IRQ by now if it was really a packet, so ignore HEADER_VALID flag
             activeReceiveStart = 0;
-            MSG("Ignore false header detection.\n");
+            MSG("Ignore false header detection.\n\r");
             return false;
         }
     }
