@@ -464,10 +464,11 @@ void printVariants(void){
       MSG("*** Error ***\n\r");
       return;
     }
-    MSG("(last sent by 0x%x) Number of neighbors=%d\n\r", np.last_sent_by_id, np.neighbors_count);
+    MSG("(last sent by %8X) Number of neighbors=%d\n\r", np.last_sent_by_id, np.neighbors_count);
     for (uint8_t i = 0; i < np.neighbors_count; i++) {
-        MSG("[0x%X, ", np.neighbors[i].node_id);
-        MSGFLOAT("snr=%.2f]\n\r", np.neighbors[i].snr);
+        MSG("[%8X, ", np.neighbors[i].node_id);
+        MSGFLOAT("snr=", np.neighbors[i].snr);
+        MSG("]\n\r");
     }
     return;
   }
@@ -516,7 +517,7 @@ bool PacketQueueClass::pop(void) {
   if (this->Count == 0) return false;
   uint8_t idx = MAX_TX_QUEUE;
   for (uint8_t i=0 ;i < (MAX_TX_QUEUE -1); i++ ){
-    if (Queue[i].size != 0) { // first not empty entry
+    if (this->Queue[i].size != 0) { // first not empty entry
       idx = i;
       break;
     }
@@ -526,12 +527,14 @@ bool PacketQueueClass::pop(void) {
     return false;
   }
   for (uint8_t i=idx; i<(MAX_TX_QUEUE -1); i++) {
-    if ( (Queue[i].size != 0) && (Queue[idx].packetTime < Queue[i].packetTime) ) idx = i; // find oldest packet
+    if ( (this->Queue[i].size != 0) && (this->Queue[idx].packetTime < this->Queue[i].packetTime) ) {
+      idx = i; // find oldest packet
+    }
   } 
   PacketToSend.packetTime = millis(); // start timer. after 1 minute, drop packet
-  PacketToSend.size = Queue[idx].size;
-  memcpy(PacketToSend.buf, Queue[idx].buf, Queue[idx].size);
-  Queue[idx].size = 0;
+  PacketToSend.size = this->Queue[idx].size;
+  memcpy(PacketToSend.buf, this->Queue[idx].buf, this->Queue[idx].size);
+  this->Queue[idx].size = 0;
   this->Count -= 1;
   return true;
 }
@@ -539,8 +542,10 @@ bool PacketQueueClass::pop(void) {
 void PacketQueueClass::clear(void) {
   for (uint8_t i = 0; i<(MAX_TX_QUEUE - 1); i++) {
     this->Queue[i].size = 0; // mark as "deleted"
-    this->Count = 0;
+    this->Queue[i].packetTime = 0;
+    memset(this->Queue[i].buf, 0, sizeof(this->Queue[i].buf));
   }
+  this->Count = 0;
 }
 
 // idStoreClass Definitions

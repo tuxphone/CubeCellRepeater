@@ -16,10 +16,9 @@
 
 #define CC_MAX_POWER        22      // TX power setting. Absolute Max for CubeCell is 22, enforced by RadioLib.
 
-#define MAX_ID_LIST  64 // number of stored packet IDs to prevent unnecesary repeating
-#define MAX_NODE_LIST 20 // number of stored known nodes
-#define MAX_TX_QUEUE 8 // max number of packets which can be waiting for transmission
-#define MAX_RHPACKETLEN 256
+#define MAX_ID_LIST         64 // number of stored packet IDs to prevent unnecesary repeating
+#define MAX_NODE_LIST       20 // number of stored known nodes
+#define MAX_TX_QUEUE        8 // max number of packets which can be waiting for transmission
 
 /// 16 bytes of random PSK for our _public_ default channel that all devices power up on (AES128)
 /// Meshtastic default key (AQ==):
@@ -35,6 +34,17 @@ static const uint8_t mypsk[] = {0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
     #define MSGFLOAT(a,b)
 #endif
 
+#define PACKET_FLAGS_HOP_LIMIT_MASK 0x07
+#define PACKET_FLAGS_WANT_ACK_MASK 0x08
+#define PACKET_FLAGS_VIA_MQTT_MASK 0x10
+#define PACKET_FLAGS_HOP_START_MASK 0xE0
+#define PACKET_FLAGS_HOP_START_SHIFT 5
+
+#include <RadioLib.h>
+
+/**************/
+#ifdef CUBECELL
+
 // Heltec borked the Arduino.h
 #ifdef __cplusplus
 #undef min
@@ -46,19 +56,12 @@ static const uint8_t mypsk[] = {0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
   using std::min;
 #endif /* __cplusplus */
 
-#define PACKET_FLAGS_HOP_LIMIT_MASK 0x07
-#define PACKET_FLAGS_WANT_ACK_MASK 0x08
-#define PACKET_FLAGS_VIA_MQTT_MASK 0x10
-#define PACKET_FLAGS_HOP_START_MASK 0xE0
-#define PACKET_FLAGS_HOP_START_SHIFT 5
-
-#include <RadioLib.h>
-
-#ifdef CUBECELL
 #include "cyPm.c"  // for reliable sleep we use MCU_deepSleep()
 extern  uint32_t systime;   // CubeCell global system time count, Millis
 SX1262 radio = new Module(RADIOLIB_BUILTIN_MODULE);
-#endif
+
+#endif // CUBECELL
+/****************/
 
 #include <assert.h>
 #include <pb.h>
@@ -72,6 +75,9 @@ extern "C"
 #include <mesh/compression/unishox2.h>
 }
 */
+
+#define MAX_RHPACKETLEN 256
+
 // struct to store the raw packet data (buf, size) and the time of receiving
 typedef struct {
     size_t   size;
