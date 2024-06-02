@@ -11,10 +11,12 @@
 #define CC_MY_LORA_BW       125.0   // use these settings, if not using a modem preset
 #define CC_MY_LORA_SF       9
 #define CC_MY_LORA_CR       5
-#define CC_MY_LORA_POWER    20       // 0 = max legal power for region
+#define CC_MY_LORA_POWER    20      // 0 = max legal power for region
 #define CC_MY_LORA_FREQ     0.0     // if you want to override frequency calculation: Freq in MHz (e.g. 869.4)
 
 #define CC_MAX_POWER        22      // TX power setting. Absolute Max for CubeCell is 22, enforced by RadioLib.
+
+#define CC_MONITOR_ONLY     false   // set true to suppress transmitting of packets (just monitor the traffic)
 
 #define MAX_ID_LIST         64 // number of stored packet IDs to prevent unnecesary repeating
 #define MAX_NODE_LIST       20 // number of stored known nodes
@@ -69,6 +71,7 @@ SX1262 radio = new Module(RADIOLIB_BUILTIN_MODULE);
 #include <pb_decode.h>
 #include <pb_encode.h>
 #include <CryptoEngine.h>
+#include <time.h>
 /*
 extern "C"
 { 

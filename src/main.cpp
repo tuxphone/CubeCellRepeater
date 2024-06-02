@@ -181,30 +181,35 @@ void startReceive(){
 
 // send packet (blocking), MCU sleeps while waiting for TX DONE
 bool perhapsSend(Packet_t* p) {
-  if (p->size > RADIOLIB_SX126X_MAX_PACKET_LENGTH) {
-    MSG("\n\r[INF]Packet size is %i! Reducing to %i. Sending ...", p->size, RADIOLIB_SX126X_MAX_PACKET_LENGTH);
-    p->size = RADIOLIB_SX126X_MAX_PACKET_LENGTH;
-  }
-  // clear irq status, standby()
-  radio.finishTransmit();
-  dio1 = false;
-  PacketHeader* h = (PacketHeader *)p->buf;
-  MSG("[TX] (id=0x%08X) HopLim=%i  ", h->id, (h->flags & PACKET_FLAGS_HOP_MASK));
-  err=radio.startTransmit(p->buf, p->size);
-  isReceiving = false;
-  if (err == RADIOLIB_ERR_NONE) {
-    MSG("starting ... ");
+  if (!CC_MONITOR_ONLY) {
+    if (p->size > RADIOLIB_SX126X_MAX_PACKET_LENGTH) {
+      MSG("\n\r[INF]Packet size is %i! Reducing to %i. Sending ...", p->size, RADIOLIB_SX126X_MAX_PACKET_LENGTH);
+      p->size = RADIOLIB_SX126X_MAX_PACKET_LENGTH;
+    }
+    // clear irq status, standby()
+    radio.finishTransmit();
+    dio1 = false;
+    PacketHeader* h = (PacketHeader *)p->buf;
+    MSG("[TX] (id=0x%08X) HopLim=%i  ", h->id, (h->flags & PACKET_FLAGS_HOP_MASK));
+    err=radio.startTransmit(p->buf, p->size);
+    isReceiving = false;
+    if (err == RADIOLIB_ERR_NONE) {
+      MSG("starting ... ");
+    } else {
+      MSG("failed, ERR = %i - resume RX\n\r", err);
+      return false;
+    }
+    delay(10);
+    MCU_deepsleep(); // wait for TX to complete, will wake on any DIO1
+    err = radio.getIrqStatus();
+    (err & RADIOLIB_SX126X_IRQ_TX_DONE) ? MSG("done!\n\r") : MSG("failed. Returned IRQ=%i\n\r", err);
+    dio1 = false;
+    radio.finishTransmit(); 
+    return ( err & RADIOLIB_SX126X_IRQ_TX_DONE );
   } else {
-    MSG("failed, ERR = %i - resume RX\n\r", err);
-    return false;
+    MSG("[TX]**Monitor only, no TX**\n\r");
+    return true;
   }
-  delay(10);
-  MCU_deepsleep(); // wait for TX to complete, will wake on any DIO1
-  err = radio.getIrqStatus();
-  (err & RADIOLIB_SX126X_IRQ_TX_DONE) ? MSG("done!\n\r") : MSG("failed. Returned IRQ=%i\n\r", err);
-  dio1 = false;
-  radio.finishTransmit(); 
-  return ( err & RADIOLIB_SX126X_IRQ_TX_DONE );
 }
 
 bool perhapsDecode(Packet_t* p) {
@@ -321,11 +326,13 @@ void printVariants(void){
       return;
     }
     // Log packet size and data fields
-    MSG("Node=%08X(%s) l=%d latI=%d lonI=%d msl=%d hae=%d geo=%d pdop=%d hdop=%d vdop=%d siv=%d fxq=%d fxt=%d pts=%d "
-             "time=%d\n\r",
+    MSG("Node=%08X(%s) l=%d latI=%d lonI=%d msl=%d hae=%d geo=%d pdop=%d hdop=%d vdop=%d siv=%d fxq=%d fxt=%d pts=%d ",
              mp.from, NodeDB.get(mp.from), d.payload.size, pos.latitude_i, pos.longitude_i, pos.altitude, pos.altitude_hae,
-             pos.altitude_geoidal_separation, pos.PDOP, pos.HDOP, pos.VDOP, pos.sats_in_view, pos.fix_quality, pos.fix_type, pos.timestamp,
-             pos.time);
+             pos.altitude_geoidal_separation, pos.PDOP, pos.HDOP, pos.VDOP, pos.sats_in_view, pos.fix_quality, pos.fix_type, pos.timestamp
+             );
+    MSG("time=%04d-%02d-%02d %02d:%02d:%02d\n\r",
+           year(pos.time), month(pos.time), day(pos.time),
+           hour(pos.time), minute(pos.time), second(pos.time));
     NodeDB.update(&theNode); // update last heard
     return;
   }
