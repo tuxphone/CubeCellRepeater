@@ -23,13 +23,16 @@ If no other meshtastic node is in range of either the node or the repeater, the 
 Will work with most packets meeting the radio settings, but the serial output is based on the assumption that the node receives meshtastic packets.
 Minimum size for none-Meshtastic packets is 16 bytes.
 
-"#define SILENT" in main.h to stop serial output.
-
 The node can decode meshtastic packets meeting some requirements:
 - they key is the default meshtastic key or provided by you (see main.h)
 - the packets are sent over channel 0, primary channel. This should already be true for all telemetry, node info, traces and DM.
 
-##Modifying radio settings:  edit the main.h
+## main.h
+"#define SILENT" in main.h to stop serial output.
+
+"#define CC_MONITOR_ONLY true" to stop repeating packets and just monitor the traffic via serial output.
+
+You can modify the radio settings in main.h (e.g using a preset, but selecting an alternate frequency slot. Or using your own freq/sf/cr settings).
 
 List of meshtastic-supported regions:
 
