@@ -32,7 +32,7 @@ The node can decode meshtastic packets meeting some requirements:
 
 "#define CC_MONITOR_ONLY true" to stop repeating packets and just monitor the traffic via serial output.
 
-You can modify the radio settiungs in main.h (e.g using a preset, but selecting an alternate frequency slot. Or using your own freq/sf/cr settings).
+You can modify the radio settings in main.h (e.g using a preset, but selecting an alternate frequency slot. Or using your own freq/sf/cr settings).
 
 List of meshtastic-supported regions:
 
