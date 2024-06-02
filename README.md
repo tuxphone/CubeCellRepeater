@@ -32,6 +32,9 @@ The node can decode meshtastic packets meeting some requirements:
 
 "#define CC_MONITOR_ONLY true" to stop repeating packets and just monitor the traffic via serial output.
 
+"#define CC_SIGNAL_NEOPIXEL" or "#define CC_SIGNAL_GPIO13" to activate visual signalization of received and transmitted packets (green/red).
+Comment the #define to stop visual signals.
+
 You can modify the radio settings in main.h (e.g using a preset, but selecting an alternate frequency slot. Or using your own freq/sf/cr settings).
 
 List of meshtastic-supported regions:
