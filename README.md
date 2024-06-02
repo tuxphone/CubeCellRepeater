@@ -29,6 +29,7 @@ The node can decode meshtastic packets meeting some requirements:
 
 ## main.h
 "#define SILENT" in main.h to stop serial output.
+
 "#define CC_MONITOR_ONLY true" to stop repeating packets and just monitor the traffic via serial output.
 
 You can modify the radio settiungs in main.h (e.g using a preset, but selecting an alternate frequency slot. Or using your own freq/sf/cr settings).
