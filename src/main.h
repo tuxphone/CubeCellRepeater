@@ -1,3 +1,4 @@
+#pragma Once
 #include <Arduino.h>
 
 // #define SILENT           // turn off serial output
@@ -17,6 +18,10 @@
 #define CC_MAX_POWER        22      // TX power setting. Absolute Max for CubeCell is 22, enforced by RadioLib.
 
 #define CC_MONITOR_ONLY     false   // set true to suppress transmitting of packets (just monitor the traffic)
+
+#define CC_SIGNAL_NEOPIXEL  // signal received packets with a green blink, signal transmits with red blink 
+//#define CC_SIGNAL_GPIO13  // signal received packets with the green LED on HTCC-AB02A
+                            // http://community.heltec.cn/t/htcc-ab02a-has-a-secret-green-led/3092/7
 
 #define MAX_ID_LIST         64 // number of stored packet IDs to prevent unnecesary repeating
 #define MAX_NODE_LIST       20 // number of stored known nodes
@@ -61,6 +66,11 @@ static const uint8_t mypsk[] = {0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
 #include "cyPm.c"  // for reliable sleep we use MCU_deepSleep()
 extern  uint32_t systime;   // CubeCell global system time count, Millis
 SX1262 radio = new Module(RADIOLIB_BUILTIN_MODULE);
+
+#ifdef CC_SIGNAL_NEOPIXEL
+#include "CubeCell_NeoPixel.h"
+CubeCell_NeoPixel pixels(1, RGB, NEO_GRB + NEO_KHZ800);
+#endif
 
 #endif // CUBECELL
 /****************/
@@ -157,6 +167,11 @@ bool perhapsSend(Packet_t* p);
 bool perhapsDecode(Packet_t* p);
 void printPacket(void);
 void printVariants(void);
+
+void signalizeRX_ON(void);
+void signalizeTX_ON(void);
+void signalizeLED_OFF(void);
+void init_signalize(void);
 
 /**************
  * Meshtastic *     https://github.com/meshtastic/firmware

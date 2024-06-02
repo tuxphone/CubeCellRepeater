@@ -5,7 +5,7 @@ void setup() {
   Serial.begin(115200);
   delay(5000);
   #endif
-
+  init_signalize();
   msgID.clear();
   txQueue.clear();
   NodeDB.clear();
@@ -39,6 +39,7 @@ void loop() {
 
   if (PacketReceived) {
     PacketReceived = false;
+    signalizeRX_ON();
     Packet_t pck;
     pck.packetTime = millis();
     pck.size = radio.getPacketLength();
@@ -145,6 +146,7 @@ void loop() {
     // wait for serial output to conplete
     delay(10);
     #endif
+    signalizeLED_OFF();
     MCU_deepsleep(); // sleep until IRQ
   }
 }
@@ -199,6 +201,7 @@ bool perhapsSend(Packet_t* p) {
       MSG("failed, ERR = %i - resume RX\n\r", err);
       return false;
     }
+    signalizeTX_ON();
     delay(10);
     MCU_deepsleep(); // wait for TX to complete, will wake on any DIO1
     err = radio.getIrqStatus();
@@ -651,4 +654,46 @@ void NodeStoreClass::add(meshtastic_NodeInfo* Node) {
     strncpy(this->nodeDB[idx].user.short_name, Node->user.short_name, sizeof(this->nodeDB[idx].user.short_name) - 1);
     strncpy(this->nodeDB[idx].user.long_name,  Node->user.long_name,  sizeof(this->nodeDB[idx].user.long_name)  - 1);
   }
+}
+
+void init_signalize(void) {
+#ifdef CC_SIGNAL_NEOPIXEL
+    pinMode(Vext,OUTPUT);
+    digitalWrite(Vext,LOW);
+    pixels.begin();
+    pixels.clear();
+#endif
+#ifdef CC_SIGNAL_GPIO13
+    pinMode(GPIO13, OUTPUT);
+#endif   
+}
+
+void signalizeRX_ON(void){
+#ifdef CC_SIGNAL_NEOPIXEL
+    pixels.setPixelColor(0, pixels.Color(0, 32, 0));
+    pixels.show();
+#endif
+#ifdef CC_SIGNAL_GPIO13
+    digitalWrite(GPIO13, HIGH);
+#endif
+}
+
+void signalizeTX_ON(void){
+#ifdef CC_SIGNAL_NEOPIXEL
+    pixels.setPixelColor(0, pixels.Color(32, 0, 0));
+    pixels.show();
+#endif
+#ifdef CC_SIGNAL_GPIO13
+    digitalWrite(GPIO13, HIGH);
+#endif
+}
+
+void signalizeLED_OFF(void){
+#ifdef CC_SIGNAL_NEOPIXEL
+    pixels.clear();
+    pixels.show();
+#endif
+#ifdef CC_SIGNAL_GPIO13
+    digitalWrite(GPIO13, LOW);
+#endif
 }
