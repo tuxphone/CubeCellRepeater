@@ -664,6 +664,9 @@ void init_signalize(void) {
     pixels.clear();
 #endif
 #ifdef CC_SIGNAL_GPIO13
+#ifndef GPIO13
+#define GPIO13 P0_6
+#endif
     pinMode(GPIO13, OUTPUT);
 #endif   
 }
