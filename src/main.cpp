@@ -205,7 +205,11 @@ bool perhapsSend(Packet_t* p) {
     delay(10);
     MCU_deepsleep(); // wait for TX to complete, will wake on any DIO1
     err = radio.getIrqStatus();
-    (err & RADIOLIB_SX126X_IRQ_TX_DONE) ? MSG("done!\n\r") : MSG("failed. Returned IRQ=%i\n\r", err);
+    if ( err & RADIOLIB_SX126X_IRQ_TX_DONE ) {
+      MSG("done!\n\r");
+    } else {
+      MSG("failed. Returned IRQ=%i\n\r", err);
+    }
     dio1 = false;
     radio.finishTransmit(); 
     return ( err & RADIOLIB_SX126X_IRQ_TX_DONE );
@@ -673,7 +677,7 @@ void init_signalize(void) {
 
 void signalizeRX_ON(void){
 #ifdef CC_SIGNAL_NEOPIXEL
-    pixels.setPixelColor(0, pixels.Color(0, 32, 0));
+    pixels.setPixelColor(0, pixels.Color(0, 16, 0));
     pixels.show();
 #endif
 #ifdef CC_SIGNAL_GPIO13
@@ -683,7 +687,7 @@ void signalizeRX_ON(void){
 
 void signalizeTX_ON(void){
 #ifdef CC_SIGNAL_NEOPIXEL
-    pixels.setPixelColor(0, pixels.Color(32, 0, 0));
+    pixels.setPixelColor(0, pixels.Color(16, 0, 0));
     pixels.show();
 #endif
 #ifdef CC_SIGNAL_GPIO13

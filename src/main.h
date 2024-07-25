@@ -1,7 +1,7 @@
 #pragma Once
 #include <Arduino.h>
 
-// #define SILENT           // turn off serial output
+//#define SILENT              // turn off serial output
 #define CC_MY_NODE_NUM      0xC00BCE11
 #define CC_MY_REGION        meshtastic_Config_LoRaConfig_RegionCode_EU_868     // see regions[] below
 #define CC_MY_LORA_PRESET   meshtastic_Config_LoRaConfig_ModemPreset_LONG_FAST // LONG FAST is default preset
