@@ -75,7 +75,7 @@ CubeCell_NeoPixel pixels(1, RGB, NEO_GRB + NEO_KHZ800);
 #endif // CUBECELL
 /****************/
 
-#include <assert.h>
+//#include <assert.h>
 #include <pb.h>
 #include <MeshTypes.h>
 #include <pb_decode.h>

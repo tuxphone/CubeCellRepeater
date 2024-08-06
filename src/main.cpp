@@ -174,8 +174,18 @@ void startReceive(){
   dio1 = false;
   err = radio.startReceiveDutyCycleAuto(preambleLength, 8,
     RADIOLIB_SX126X_IRQ_RX_DEFAULT | RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED | RADIOLIB_SX126X_IRQ_HEADER_VALID);
-  if (err != RADIOLIB_ERR_NONE) MSG("[ERROR]Radiolib error %d when attempting SX126X startReceiveDutyCycleAuto!\n\r", err);
-  assert(err == RADIOLIB_ERR_NONE);
+  //assert(err == RADIOLIB_ERR_NONE);
+  while (err != RADIOLIB_ERR_NONE) {
+    MSG("[ERROR]Radiolib error %d when attempting SX126X startReceiveDutyCycleAuto!\n\r", err);
+    delay(500);
+    MSG("[INF]Trying to restart modem...");
+    radio.reset();
+    applyModemConfig();
+    err = radio.startReceiveDutyCycleAuto(preambleLength, 8,
+    RADIOLIB_SX126X_IRQ_RX_DEFAULT | RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED | RADIOLIB_SX126X_IRQ_HEADER_VALID);
+    (err == RADIOLIB_ERR_NONE) ? MSG("success!\n\r") : MSG("failed!\n\r");
+  }
+  
   //radio.setDio1Action(ISR_dio1Action);
   isReceiving = true;
   MSG("[RX] ... \n\r");
@@ -237,7 +247,7 @@ bool perhapsDecode(Packet_t* p) {
   mp.which_payload_variant = meshtastic_MeshPacket_encrypted_tag;
   mp.encrypted.size = 0;
   static uint8_t scratchbuf[MAX_RHPACKETLEN];
-  assert(len <= sizeof(scratchbuf));
+  //assert(len <= sizeof(scratchbuf));
   // we have to copy into a scratch buffer, because mp.encrypted is a union with the decoded protobuf
   memcpy(scratchbuf, p->buf + sizeof(PacketHeader), len); 
   crypto->decrypt(mp.from, mp.id, len, scratchbuf);
@@ -650,7 +660,6 @@ void NodeStoreClass::add(meshtastic_NodeInfo* Node) {
       }
     }
   }
-  //assert(idx != 0);
   this->nodeDB[idx].num = Node->num;;
   this->nodeDB[idx].has_user = true;
   this->nodeDB[idx].last_heard = Node->last_heard;
