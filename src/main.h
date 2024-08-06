@@ -1,7 +1,6 @@
 #pragma Once
 #include <Arduino.h>
 
-//#define SILENT              // turn off serial output
 #define CC_MY_NODE_NUM      0xC00BCE11
 #define CC_MY_REGION        meshtastic_Config_LoRaConfig_RegionCode_EU_868     // see regions[] below
 #define CC_MY_LORA_PRESET   meshtastic_Config_LoRaConfig_ModemPreset_LONG_FAST // LONG FAST is default preset
@@ -32,14 +31,6 @@
 static const uint8_t mypsk[] = {0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
                                 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01};
 // No Crypto = all zero
-
-#ifndef SILENT
-    #define MSG(...) Serial.printf(__VA_ARGS__)
-    #define MSGFLOAT(a,b) Serial.print(a); Serial.print(b)
-#else
-    #define MSG(...)
-    #define MSGFLOAT(a,b)
-#endif
 
 #define PACKET_FLAGS_HOP_LIMIT_MASK 0x07
 #define PACKET_FLAGS_WANT_ACK_MASK 0x08
@@ -75,10 +66,10 @@ CubeCell_NeoPixel pixels(1, RGB, NEO_GRB + NEO_KHZ800);
 #endif // CUBECELL
 /****************/
 
-#include <assert.h>
+//#include <assert.h>
 #include <pb.h>
 #include <MeshTypes.h>
-#include <pb_decode.h>
+//#include <pb_decode.h>
 #include <pb_encode.h>
 #include <CryptoEngine.h>
 #include <time.h>
@@ -126,20 +117,9 @@ public:
     bool add(uint32_t id);
 } msgID;
 
-class NodeStoreClass {
-private:
-    meshtastic_NodeInfo nodeDB[MAX_NODE_LIST];
-    void add(meshtastic_NodeInfo* Node);
-public:
-    void clear(void);
-    void update(meshtastic_NodeInfo* Node);
-    // get the short name of the node. "" if unknown.
-    char* get(uint32_t num);
-} NodeDB;
-
 CryptoKey psk;
 meshtastic_MeshPacket mp;
-meshtastic_NodeInfo theNode;
+//meshtastic_NodeInfo theNode;
 bool repeatPacket = false;
 int err = RADIOLIB_ERR_NONE;
 bool PacketReceived = false;
@@ -164,9 +144,6 @@ void ISR_dio1Action(void) {
 void MCU_deepsleep(void);
 void startReceive(void);
 bool perhapsSend(Packet_t* p);
-bool perhapsDecode(Packet_t* p);
-void printPacket(void);
-void printVariants(void);
 
 void signalizeRX_ON(void);
 void signalizeTX_ON(void);
@@ -208,22 +185,10 @@ size_t pb_encode_to_bytes(uint8_t *destbuf, size_t destbufsize, const pb_msgdesc
 {
     pb_ostream_t stream = pb_ostream_from_buffer(destbuf, destbufsize);
     if (!pb_encode(&stream, fields, src_struct)) {
-        MSG("[ERROR]Panic: can't encode protobuf reason='%s'\n", PB_GET_ERROR(&stream));
+        return 0;
         //assert(0); // If this assert fails it probably means you made a field too large for the max limits specified in mesh.options
     } else {
         return stream.bytes_written;
-    }
-}
-
-/// helper function for decoding a record as a protobuf, we will return false if the decoding failed
-bool pb_decode_from_bytes(const uint8_t *srcbuf, size_t srcbufsize, const pb_msgdesc_t *fields, void *dest_struct)
-{
-    pb_istream_t stream = pb_istream_from_buffer(srcbuf, srcbufsize);
-    if (!pb_decode(&stream, fields, dest_struct)) {
-        MSG("[ERROR]Can't decode protobuf reason='%s', pb_msgdesc %p\n", PB_GET_ERROR(&stream), fields);
-        return false;
-    } else {
-        return true;
     }
 }
 
@@ -368,11 +333,9 @@ const RegionInfo regions[] = {
 
 void initRegion()
 {
-    MSG("[INF]Init region List ...");
     const RegionInfo *r = regions;
     for (; r->code != meshtastic_Config_LoRaConfig_RegionCode_UNSET && r->code != CC_MY_REGION; r++) ;
     myRegion = r;
-    MSG(" done!\n");
 }
 
 /** hash a string into an integer
@@ -532,8 +495,6 @@ void applyModemConfig()
         channel_num = (CC_CHANNEL_SLOT-1) % numChannels;
     }
 
-    MSG("[INF]Channel name is \"%s\"\n\r", channelName);
-    MSG("[INF]Channel slot is %i (%i available frequency slots).\n\r", channel_num + 1, numChannels);
     freq = myRegion->freqStart + (bw / 2000) + (channel_num * (bw / 1000));
 
     // override if we have a verbatim frequency
@@ -541,18 +502,16 @@ void applyModemConfig()
         freq = CC_MY_LORA_FREQ;
         channel_num = -1;
     }
-    
-    MSG("[INF]Using Region %s : freq=%d bw=%i sf=%i cr=%i power=%i ... ",myRegion->name, lround(freq*1E6), lround(bw*1000), sf, cr, power);
-    
+        
     // Syncword is 0x2b, see RadioLibInterface.h
     // preamble length is 16, see RadioInterface.h
     
     err = radio.begin(freq, bw, sf, cr, 0x2b, power, 16); 
-
+    
     if (err == RADIOLIB_ERR_NONE) {
-        MSG("success!\n");
+       // success
     } else {
-        MSG("\n[ERROR] [SX1262} Init failed, code: %i\n\n\r ** Full Stop **", err);
+        signalizeTX_ON();
         while (true);
     }
 
@@ -560,7 +519,6 @@ void applyModemConfig()
     slotTimeMsec = 8.5 * pow(2, sf) / bw + 0.2 + 0.4 + 7;
     preambleTimeMsec = getPacketTime((uint32_t)0);
     maxPacketTimeMsec = getPacketTime(meshtastic_Constants_DATA_PAYLOAD_LEN + sizeof(PacketHeader));
-    MSG("[INF]SlotTime=%ims PreambleTime=%ims maxPacketTime=%ims\n\r", slotTimeMsec, preambleTimeMsec, maxPacketTimeMsec);
 }
 
 /** The delay to use when we want to flood a message */
@@ -597,12 +555,10 @@ bool isActivelyReceiving()
         } else if ((now - activeReceiveStart > 2 * preambleTimeMsec) && !(irq & RADIOLIB_SX126X_IRQ_HEADER_VALID)) {
             // The HEADER_VALID flag should be set by now if it was really a packet, so ignore PREAMBLE_DETECTED flag
             activeReceiveStart = 0;
-            MSG("Ignore false preamble detection.\n\r");
             return false;
         } else if (now - activeReceiveStart > maxPacketTimeMsec) {
             // We should have gotten an RX_DONE IRQ by now if it was really a packet, so ignore HEADER_VALID flag
             activeReceiveStart = 0;
-            MSG("Ignore false header detection.\n\r");
             return false;
         }
     }
